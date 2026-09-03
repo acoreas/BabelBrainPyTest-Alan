@@ -238,3 +238,70 @@ This "test" can be run with the following command:
 ```bash
 pytest -k "test_generate_valid_outputs" -m "basic_babelbrain_params"
 ```
+
+## Isolating a pytest run (crash and memory triage)
+
+A large selection is a single long-lived process: `pytest Tests -m "basic_babelbrain_params"` collects
+~1300 cases and runs them all in one interpreter. When that process dies half way through — killed by a
+signal, or by the OS after memory creeps up — the terminal scrollback is all you get, the html report is
+never written, and there is no record of which case was running.
+
+[Tools/isolate_pytest.py](Tools/isolate_pytest.py) takes the same arguments you would give pytest, asks
+pytest which cases they select, and runs **each case in its own pytest process**. A process per case is
+the only bullet-proof deallocation: when it exits, every host buffer, Metal/CUDA/OpenCL context and Qt
+object is released back to the OS, so anything that still grows across cases is on disk or in the GPU
+driver rather than a leak that teardown would fix.
+
+```bash
+# generate a per-case runner script, run nothing
+python Tests/Tools/isolate_pytest.py -- -s -m "basic_babelbrain_params"
+
+# collect and run now, one case per process
+python Tests/Tools/isolate_pytest.py --run -- -s -m "basic_babelbrain_params"
+
+# rerun only the cases that did not pass
+python Tests/Tools/isolate_pytest.py --run --from-file PyTest_Reports/isolated/<run>/failed_nodeids.txt
+```
+
+Everything after `--` goes to pytest verbatim. With no path argument the whole `Tests` tree is selected.
+The tool works from any directory: it finds the BabelBrain checkout holding this `Tests` clone from its
+own location and runs pytest from there (`--root` points it at a different checkout).
+
+### What you get
+
+Artifacts are written to `<BabelBrain>/PyTest_Reports/isolated/<timestamp>/`:
+
+| file | contents |
+| --- | --- |
+| `nodeids.txt` | every collected case, one per line |
+| `run_isolated.sh` / `.bat` | one `run_case` line per case — edit or comment out lines freely |
+| `logs/NNNN_<case>.log` | full output of that case, flushed line by line so a hard kill still leaves a readable file |
+| `summary.csv` | status, exit code, duration, peak RSS and free memory per case |
+| `failed_nodeids.txt` | feed straight back in with `--from-file` |
+
+Exit codes are decoded per case: `PASS`, `FAIL`, `CRASH` with the signal name (`SIGSEGV`, `SIGBUS`,
+`SIGABRT`, `SIGKILL` — the last usually meaning the OS ran out of memory), `TIMEOUT`, `MEMLIMIT`, and
+`NO_TESTS_RUN`. Child processes run with `PYTHONFAULTHANDLER=1`, so a native segfault prints the Python
+line that caused it instead of dying silently.
+
+### Chasing a memory problem
+
+Every row of `summary.csv` records peak RSS of the whole process tree plus free system memory before,
+during and after the case.
+
+```bash
+# is one case at fault, or is it accumulation? passes at 1, dies at 20 => accumulation
+python Tests/Tools/isolate_pytest.py --run --group 20 -- -m "basic_babelbrain_params"
+
+# does one case leak? run it 5x inside a single process and watch peak RSS
+python Tests/Tools/isolate_pytest.py --run --repeat-each 5 --group 5 -- -k "H317 and Metal and NONE" -m basic_babelbrain_params
+
+# stop a runaway before the OS kills your session, and bound a hang
+python Tests/Tools/isolate_pytest.py --run --max-rss-mb 60000 --timeout 3600 -- -m "basic_babelbrain_params"
+```
+
+Other useful options: `--stop-on-crash`, `--start-at`/`--max-cases` to resume a long run, `--cooldown`
+to let the GPU driver settle between cases, `--keep-html` for a per-case html report, `--quiet-child` to
+keep the console tidy (the logs are unaffected), and `--dry-run` to see the commands. Long GPU steps
+produce no output for minutes, so the runner prints a heartbeat with elapsed time and current RSS while a
+case is silent (`--heartbeat SEC`, `0` disables). Run `--help` for the full list.
