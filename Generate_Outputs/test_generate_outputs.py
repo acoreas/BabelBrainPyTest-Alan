@@ -4,7 +4,7 @@ from glob import glob
 import shutil
 
 pytest.mark.generate_outputs
-def test_generate_valid_outputs(qtbot,babelbrain_widget,image_to_base64,request):
+def test_generate_valid_outputs(qtbot,babelbrain_widget,image_to_base64,request,mock_confirm_pseudoct):
 
     # Save plot screenshot to be added to html report later
     request.node.screenshots = []

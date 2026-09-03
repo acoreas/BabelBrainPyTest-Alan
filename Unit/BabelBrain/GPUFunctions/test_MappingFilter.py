@@ -24,7 +24,7 @@ def test_MappingFilter_vs_CPU(computing_backend,dataset,spatial_step,check_os,ge
     }
 
     # Initialize GPU Backend
-    gpu_device = get_gpu_device()
+    gpu_device = get_gpu_device
     MappingFilter.InitMapFilter(gpu_device,computing_backend['type'])
 
     # Load inputs

@@ -22,7 +22,7 @@ def test_Resample_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_gpu
     }
 
     # Initialize GPU Backend
-    gpu_device = get_gpu_device()
+    gpu_device = get_gpu_device
     Resample.InitResample(gpu_device,computing_backend['type'])
 
     # Load inputs

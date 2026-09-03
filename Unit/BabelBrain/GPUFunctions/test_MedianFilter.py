@@ -21,7 +21,7 @@ def test_MedianFilter_vs_CPU(computing_backend,dataset,spatial_step,check_os,get
      }
 
      # Initialize GPU Backend
-     gpu_device = get_gpu_device()
+     gpu_device = get_gpu_device
      MedianFilter.InitMedianFilter(gpu_device,computing_backend['type'])
 
      # Load inputs

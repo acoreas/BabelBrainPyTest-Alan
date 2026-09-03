@@ -21,7 +21,7 @@ def test_LabelImage_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_g
     }
 
     # Initialize GPU Backend
-    gpu_device = get_gpu_device()
+    gpu_device = get_gpu_device
     LabelImage.InitLabel(gpu_device,computing_backend['type'])
 
     # Load inputs

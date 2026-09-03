@@ -24,7 +24,7 @@ def test_Voxelize_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_gpu
      }
 
      # Initialize GPU Backend
-     gpu_device = get_gpu_device()
+     gpu_device = get_gpu_device
      Voxelize.InitVoxelize(gpu_device,computing_backend['type'])
 
      # Load inputs
@@ -66,7 +66,7 @@ def test_Voxelize_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_gpu
      save_voxel_plot = get_pyvista_plot['voxel_plot']
      save_mesh_plot = get_pyvista_plot['mesh_plot']
      request.node.screenshots = []
-     screenshot = save_mesh_plot(input_data['skin'], title="Skin Mesh")
+     screenshot = save_mesh_plot([input_data['skin']], title="Skin Mesh")
      request.node.screenshots.append(screenshot)
      screenshot = save_voxel_plot(input_data['skin'],points_cpu, title="Skin Mesh Voxelized - Truth")
      request.node.screenshots.append(screenshot)

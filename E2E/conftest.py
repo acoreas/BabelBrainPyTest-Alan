@@ -37,21 +37,19 @@ def compare_BabelBrain_Outputs(compare_data):
         compare_h5 = compare_data["h5_data"]
         matches = []
         missing_ref_files = []
-        print('*'*50)
-        print('TOLERANCE =',tolerance)
-        print('*'*50)
+        logging.info(f'TOLERANCE = {tolerance}')
         for h5_test in h5_tests:
             test_base = grab_folder_file_name(h5_test)
             h5_ref = ref_lookup.get(test_base)
             if h5_ref:
-                logging.info(f"\n\nComparing\n{h5_test}\n{h5_ref}\n")
+                logging.info('\n' + '*'*100 + f"\n\nCOMPARING\n{h5_test} FILE\nTO\n{h5_ref} FILE\n\n" + '*'*100)
                 matches.append(compare_h5(h5_ref, h5_test, node_screenshots,tolerance=tolerance))
             else:
                 # See if there is another reference file that uses different gpu
                 test_base_no_gpu = grab_folder_file_name(h5_test,no_gpu=True)
                 h5_ref = ref_lookup_no_gpu.get(test_base_no_gpu)
                 if h5_ref:
-                    logging.info(f"\nComparing\n{h5_test}\n{h5_ref}\n")
+                    logging.info('\n' + '*'*100 + f"\n\nCOMPARING\n{h5_test} FILE\nTO\n{h5_ref} FILE\n\n" + '*'*100)
                     matches.append(compare_h5(h5_ref, h5_test, node_screenshots,tolerance=tolerance))
                 else:
                     missing_ref_files.append(h5_test)
