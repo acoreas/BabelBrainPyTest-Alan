@@ -16,7 +16,7 @@ def test_MappingFilter_vs_CPU(computing_backend,dataset,spatial_step,check_os,ge
         'T1W': dataset['T1_path'],
         'Final_Tissues': dataset['m2m_folder_path'] + 'final_tissues.nii.gz'
     }
-    spatial_step_text = re.sub("\.","_",str(spatial_step))
+    spatial_step_text = re.sub("\\.","_",str(spatial_step))
     output_fnames = {
         'Resampled_T1W': input_folder + f"T1W_cpu_resampled_spatial_step_{spatial_step_text}.nii.gz",
         'Resampled_Final_Tissues': input_folder + f"final_tissues_cpu_resampled_spatial_step_{spatial_step_text}.nii.gz",

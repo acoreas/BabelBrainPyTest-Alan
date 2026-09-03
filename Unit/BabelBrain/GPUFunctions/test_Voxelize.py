@@ -18,7 +18,7 @@ def test_Voxelize_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_gpu
           'T1W': dataset['T1_path'],
           'skin': dataset['m2m_folder_path'] + os.sep + 'skin.stl',
      }
-     spatial_step_text = re.sub("\.","_",str(spatial_step))
+     spatial_step_text = re.sub("\\.","_",str(spatial_step))
      output_fnames = {
           'Output_Truth': input_folder + f"T1W_cpu_voxelized_spatial_step_{spatial_step_text}.npy",
      }

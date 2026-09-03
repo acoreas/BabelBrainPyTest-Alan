@@ -82,8 +82,7 @@ invalid_trajectories = [
     'Outside_Target'
 ]
 SimNIBS_type = {
-    'charm': 0,
-    'headreco': 1
+    'charm': 0
 }
 test_datasets = [
     {'id': 'SDR_0p31','folder_path': test_data_folder + os.sep + 'SDR_0p31' + os.sep},
@@ -1091,6 +1090,19 @@ def pytest_collection_modifyitems(config, items):
             "slicer" in item.name and \
             ("CT" in item.name or "NONE" in item.name):
             item.add_marker(pytest.mark.orig_paper_params)
+
+        if "Deep_Target" in item.name and \
+            "ID_0082" in item.name and (\
+            ("H317" in item.name and ("250kHz" in item.name )) or \
+            ("Single" in item.name and "250kHz" in item.name) or \
+            "CTX_250" in item.name or \
+            "H246" in item.name or \
+            "BSonix" in item.name or \
+            ("REMOPD" in item.name and "300kHz" in item.name)) or \
+            "PETRA" not in item.name and \
+            "brainsight" in item.name and \
+            ("NONE" in item.name):
+            item.add_marker(pytest.mark.bare_min_babelbrain_params)
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item,call):

@@ -16,7 +16,7 @@ def test_Resample_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_gpu
     order = 3
     file_type = 'T1W'
     input_files = {file_type: input_folder + 'T1W.nii.gz',}
-    spatial_step_text = re.sub("\.","_",str(spatial_step))
+    spatial_step_text = re.sub("\\.","_",str(spatial_step))
     output_fnames = {
         'Output_Truth': input_folder + f"{file_type}_cpu_resampled_order_{order}_spatial_step_{spatial_step_text}.nii.gz",
     }

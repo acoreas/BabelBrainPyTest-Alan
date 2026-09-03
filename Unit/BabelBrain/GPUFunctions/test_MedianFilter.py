@@ -14,7 +14,7 @@ def test_MedianFilter_vs_CPU(computing_backend,dataset,spatial_step,check_os,get
      # Parameters
      input_folder = dataset['folder_path']
      input_files = {'CT': input_folder + 'CT.nii.gz',}
-     spatial_step_text = re.sub("\.","_",str(spatial_step))
+     spatial_step_text = re.sub("\\.","_",str(spatial_step))
      output_fnames = {
           'Resampled_Input': input_folder + f"CT_cpu_resampled_spatial_step_{spatial_step_text}.nii.gz",
           'Output_Truth': input_folder + f"CT_cpu_median_filter_spatial_step_{spatial_step_text}.nii.gz"
