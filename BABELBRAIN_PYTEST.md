@@ -277,6 +277,7 @@ Artifacts are written to `<BabelBrain>/PyTest_Reports/isolated/<timestamp>/`:
 | `run_isolated.sh` / `.bat` | one `run_case` line per case — edit or comment out lines freely |
 | `logs/NNNN_<case>.log` | full output of that case, flushed line by line so a hard kill still leaves a readable file |
 | `summary.csv` | status, exit code, duration, peak RSS and free memory per case |
+| `html/NNNN_<case>.html` | that case's pytest-html report, with the GUI screenshots embedded |
 | `failed_nodeids.txt` | feed straight back in with `--from-file` |
 
 Exit codes are decoded per case: `PASS`, `FAIL`, `CRASH` with the signal name (`SIGSEGV`, `SIGBUS`,
@@ -301,7 +302,9 @@ python Tests/Tools/isolate_pytest.py --run --max-rss-mb 60000 --timeout 3600 -- 
 ```
 
 Other useful options: `--stop-on-crash`, `--start-at`/`--max-cases` to resume a long run, `--cooldown`
-to let the GPU driver settle between cases, `--keep-html` for a per-case html report, `--quiet-child` to
-keep the console tidy (the logs are unaffected), and `--dry-run` to see the commands. Long GPU steps
+to let the GPU driver settle between cases, `--no-html` to skip the per-case html report (keep it on if a
+test takes screenshots: `conftest.py` attaches them through `pytest_html.extras`, which only exists while
+the html plugin is loaded), `--quiet-child` to keep the console tidy (the logs are unaffected), and
+`--dry-run` to see the commands. Long GPU steps
 produce no output for minutes, so the runner prints a heartbeat with elapsed time and current RSS while a
 case is silent (`--heartbeat SEC`, `0` disables). Run `--help` for the full list.

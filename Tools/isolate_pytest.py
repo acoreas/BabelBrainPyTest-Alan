@@ -155,9 +155,10 @@ def parse_args(argv):
     p.add_argument("--stop-on-crash", action="store_true",
                    help="stop the whole run at the first crash/timeout (failures do not stop it)")
     p.add_argument("--stop-on-fail", action="store_true", help="stop at the first non-passing case")
-    p.add_argument("--keep-html", action="store_true",
-                   help="write a per-case pytest-html report (default: html disabled, it is what renames "
-                        "report.html once per session)")
+    p.add_argument("--no-html", dest="keep_html", action="store_false", default=True,
+                   help="disable the per-case pytest-html report. Off by default because conftest.py "
+                        "attaches the GUI screenshots to it through pytest_html.extras, which only exists "
+                        "while the html plugin is loaded")
     p.add_argument("--quiet-child", action="store_true",
                    help="do not echo the pytest output to the console (it always goes to the log file)")
     p.add_argument("--python", default=sys.executable, metavar="EXE",
@@ -253,6 +254,14 @@ def filter_pytest_flags(pytest_args):
     return kept
 
 
+def html_args(run_dir, tag_expr, slug_expr, keep_html, sep="/"):
+    """`--html` for one case. tag/slug are literal for the driver and shell variable
+    references for the generated scripts, so both produce the same file names."""
+    if not keep_html:
+        return []
+    return ["--html", f"{run_dir}{sep}html{sep}{tag_expr}_{slug_expr}.html", "--self-contained-html"]
+
+
 def build_per_case_flags(pytest_args, keep_html):
     flags = ["-o", "addopts="]           # ini addopts drives the shared html report, drop it
     user = filter_pytest_flags(pytest_args)
@@ -285,10 +294,14 @@ def collect_nodeids(python_exe, pytest_args, cwd):
     # counts. So clear addopts, strip any verbosity flag the caller passed, and
     # set our own single -q.
     clean = [a for a in pytest_args if not VERBOSITY_FLAGS.match(a)]
+    # Clearing addopts already drops the ini's --html, so pytest-html writes nothing
+    # for a collection; no need to unload the plugin here (and unloading it is what
+    # breaks conftest's screenshot hook, so keep the two passes consistent).
     cmd = [python_exe, "-m", "pytest", *clean,
            "--collect-only", "-q", "--color=no", "--no-header",
-           "-o", "addopts=", "-p", "no:cacheprovider", "-p", "no:html", "-p", "no:warnings"]
-    print("Collecting cases:\n  " + " ".join(shlex.quote(c) for c in cmd) + "\n", flush=True)
+           "-o", "addopts=", "-p", "no:cacheprovider", "-p", "no:warnings"]
+    print("Collecting cases (collection only, no tests are run):\n  "
+          + " ".join(shlex.quote(c) for c in cmd) + "\n", flush=True)
     proc = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                           text=True, errors="replace")
     out = proc.stdout
@@ -428,8 +441,7 @@ def run_chunk(idx, total_chunks, nodeids, flags, python_exe, cwd, run_dir, args)
 
     cmd = [python_exe, "-m", "pytest", *nodeids, *flags,
            "-o", f"log_file={logs_dir / (tag + '_' + slug + '.pytest.log')}"]
-    if args.keep_html:
-        cmd += ["--html", str(run_dir / "html" / f"{tag}_{slug}.html"), "--self-contained-html"]
+    cmd += html_args(run_dir, tag, slug, args.keep_html, sep=os.sep)
 
     header = f"[{idx}/{total_chunks}] " + (nodeids[0] if len(nodeids) == 1 else f"{len(nodeids)} cases starting with {nodeids[0]}")
     print("\n" + "=" * 100 + f"\n{header}\n" + "=" * 100, flush=True)
@@ -526,6 +538,10 @@ def run_chunk(idx, total_chunks, nodeids, flags, python_exe, cwd, run_dir, args)
     duration = time.monotonic() - t0
     avail_after, swap_after = sys_mem()
 
+    pytest_log = logs_dir / f"{tag}_{slug}.pytest.log"
+    if pytest_log.exists() and pytest_log.stat().st_size == 0:
+        pytest_log.unlink()          # these tests print rather than log; do not leave empty files around
+
     if timed_out:
         status, detail = STATUS_TIMEOUT, f"exceeded {args.timeout}s"
     elif watcher.killed_for_memory:
@@ -568,6 +584,7 @@ cd "@@CWD@@" || exit 1
 PYTHON="@@PYTHON@@"
 RUNDIR="@@RUNDIR@@"
 LOGDIR="$RUNDIR/logs"
+HTMLDIR="$RUNDIR/html"
 SUMMARY="$RUNDIR/summary_shell.csv"
 TOTAL=@@TOTAL@@
 STOP_ON_CRASH=0            # set to 1 to abort at the first crash
@@ -576,7 +593,7 @@ PYTEST_FLAGS=(@@FLAGS@@)
 export PYTHONFAULTHANDLER=1   # turn a segfault into a printable python traceback
 export PYTHONUNBUFFERED=1
 
-mkdir -p "$LOGDIR"
+mkdir -p "$LOGDIR" "$HTMLDIR"
 echo "index,status,returncode,duration_s,peak_rss_mb,nodeid" > "$SUMMARY"
 
 TIMECMD=()
@@ -597,10 +614,11 @@ run_case() {
   START=$(date +%s)
   {
     echo "# $*"
-    "${TIMECMD[@]}" "$PYTHON" -m pytest "$@" "${PYTEST_FLAGS[@]}" \
+    "${TIMECMD[@]}" "$PYTHON" -m pytest "$@" "${PYTEST_FLAGS[@]}" @@HTMLARGS_SH@@ \
         -o "log_file=$LOGDIR/${IDX}_${SLUG}.pytest.log"
   } > "$LOG" 2>&1
   RC=$?
+  [ -s "$LOGDIR/${IDX}_${SLUG}.pytest.log" ] || rm -f "$LOGDIR/${IDX}_${SLUG}.pytest.log"
   END=$(date +%s)
   DUR=$((END-START))
   PEAK=$(grep -i -m1 "maximum resident set size" "$LOG" | tr -dc '0-9')
@@ -638,6 +656,7 @@ cd /d "@@CWD@@" || exit /b 1
 set "PYTHON=@@PYTHON@@"
 set "RUNDIR=@@RUNDIR@@"
 set "LOGDIR=%RUNDIR%\logs"
+set "HTMLDIR=%RUNDIR%\html"
 set "SUMMARY=%RUNDIR%\summary_shell.csv"
 set TOTAL=@@TOTAL@@
 set STOP_ON_CRASH=0
@@ -647,6 +666,7 @@ set PYTHONUNBUFFERED=1
 set FAILED=0
 
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
+if not exist "%HTMLDIR%" mkdir "%HTMLDIR%"
 echo index,status,returncode,nodeid> "%SUMMARY%"
 
 @@CASES@@
@@ -672,7 +692,7 @@ echo.
 echo ====================================================================================
 echo [%IDX%/%TOTAL%] !NODEID!
 echo ====================================================================================
-"%PYTHON%" -m pytest !NODEID! %PYTEST_FLAGS% -o "log_file=%LOGDIR%\%IDX%_%SLUG%.pytest.log" > "%LOG%" 2>&1
+"%PYTHON%" -m pytest !NODEID! %PYTEST_FLAGS% @@HTMLARGS_BAT@@ -o "log_file=%LOGDIR%\%IDX%_%SLUG%.pytest.log" > "%LOG%" 2>&1
 set RC=!errorlevel!
 if !RC! equ 0 (set "STATUS=PASS") else if !RC! equ 1 (set "STATUS=FAIL") else if !RC! equ 5 (set "STATUS=NO_TESTS_RUN") else (set "STATUS=CRASH")
 echo %IDX%,!STATUS!,!RC!,"!NODEID!">> "%SUMMARY%"
@@ -692,7 +712,7 @@ def chunk_slug(chunk):
     return f"{slugify(chunk[0], 60)}__plus{len(chunk) - 1}"
 
 
-def emit_sh(path, chunks, flags, python_exe, cwd, run_dir, src_cmd):
+def emit_sh(path, chunks, flags, python_exe, cwd, run_dir, src_cmd, keep_html=True):
     cases = []
     for i, chunk in enumerate(chunks, 1):
         ids = " ".join(shlex.quote(n) for n in chunk)
@@ -706,12 +726,14 @@ def emit_sh(path, chunks, flags, python_exe, cwd, run_dir, src_cmd):
             .replace("@@RUNDIR@@", str(run_dir))
             .replace("@@TOTAL@@", str(len(chunks)))
             .replace("@@FLAGS@@", " ".join(shlex.quote(f) for f in flags))
+            .replace("@@HTMLARGS_SH@@",
+                     '--html "$HTMLDIR/${IDX}_${SLUG}.html" --self-contained-html' if keep_html else "")
             .replace("@@CASES@@", "\n".join(cases)))
     path.write_text(body, encoding="utf-8")
     path.chmod(0o755)
 
 
-def emit_bat(path, chunks, flags, python_exe, cwd, run_dir, src_cmd):
+def emit_bat(path, chunks, flags, python_exe, cwd, run_dir, src_cmd, keep_html=True):
     cases = []
     for i, chunk in enumerate(chunks, 1):
         ids = " ".join(f'"{n}"' for n in chunk)
@@ -724,6 +746,8 @@ def emit_bat(path, chunks, flags, python_exe, cwd, run_dir, src_cmd):
             .replace("@@RUNDIR@@", str(run_dir))
             .replace("@@TOTAL@@", str(len(chunks)))
             .replace("@@FLAGS_FLAT@@", " ".join(flags))
+            .replace("@@HTMLARGS_BAT@@",
+                     '--html "%HTMLDIR%\\%IDX%_%SLUG%.html" --self-contained-html' if keep_html else "")
             .replace("@@CASES@@", "\n".join(cases)))
     path.write_text(body, encoding="utf-8")
 
@@ -785,14 +809,17 @@ def main():
     written = []
     if emit in ("sh", "both"):
         p = run_dir / "run_isolated.sh"
-        emit_sh(p, chunks, flags, args.python, cwd, run_dir, src_cmd)
+        emit_sh(p, chunks, flags, args.python, cwd, run_dir, src_cmd, args.keep_html)
         written.append(p)
     if emit in ("bat", "both"):
         p = run_dir / "run_isolated.bat"
-        emit_bat(p, chunks, flags, args.python, cwd, run_dir, src_cmd)
+        emit_bat(p, chunks, flags, args.python, cwd, run_dir, src_cmd, args.keep_html)
         written.append(p)
 
+    per_case_preview = ["pytest", "<node id>"] + flags + html_args(
+        run_dir, "NNNN", "<case>", args.keep_html, sep=os.sep)
     print(f"\nBabelBrain root  : {root}")
+    print(f"Each case runs   : " + " ".join(shlex.quote(c) for c in per_case_preview))
     print(f"Output directory : {run_dir}")
     print(f"Cases            : {len(nodeids)} ({len(chunks)} pytest process(es), {group} case(s) each)")
     print(f"Node ids         : {run_dir / 'nodeids.txt'}")

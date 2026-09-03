@@ -866,7 +866,17 @@ def babelbrain_widget(request,qtbot,
         # Copy Trajectory file over to output folder
         trajectory_new_file = os.path.join(output_folder,os.path.basename(bb_widget.Config['Mat4Trajectory']))
         shutil.copy(bb_widget.Config['Mat4Trajectory'],trajectory_new_file)
-        bb_widget.Config['ID'] = os.path.splitext(os.path.basename(bb_widget.Config['Mat4Trajectory']))[0] # Affects trajectory naming in output files
+        # Affects trajectory naming in output files. BabelBrain normalises Config['ID'] itself
+        # when it reads the trajectory, and the shape differs between versions: a plain string
+        # up to v0.8.x, a list (one entry per trajectory/transducer) from the dual-Tx refactor on.
+        # Preserve whatever shape the app produced - assigning a bare string to a list-based
+        # version makes it iterate over the characters of the name and rerun Step 1 once per letter.
+        new_ID = os.path.splitext(os.path.basename(bb_widget.Config['Mat4Trajectory']))[0]
+        if isinstance(bb_widget.Config['ID'], str):
+            bb_widget.Config['ID'] = new_ID
+        else:
+            n_traj = len(bb_widget.Config['ID'])
+            bb_widget.Config['ID'] = [new_ID] if n_traj == 1 else [f"{new_ID}_{i}" for i in range(n_traj)]
 
         # Edit file paths so new data is saved in output folder
         bb_widget.Config['Mat4Trajectory'] = trajectory_new_file
