@@ -1,40 +1,41 @@
 
-import datetime
-import os
-import sys
-sys.path.append('./BabelBrain/')
-import platform
-import shutil
-import re
-import configparser
-import logging
-
 import base64
-import h5py
+import configparser
+import datetime
+import logging
+import os
+import platform
+import re
+import shutil
+import sys
 from io import BytesIO
+from pathlib import Path
+from pprint import pprint
+
+import h5py
 import matplotlib
-matplotlib.use('Agg')  # Use the 'Agg' backend, which is noninteractive
 import matplotlib.pyplot as plt
-from PIL import Image
 import nibabel
-from nibabel import processing, nifti1, affines
 import numpy as np
-np.random.seed(42) # RNG is same every time
-from PySide6.QtCore import Qt
 import pytest
 import pytest_html
 import pyvista as pv
 import SimpleITK as sitk
-from skimage.metrics import structural_similarity, mean_squared_error,normalized_root_mse
 import trimesh
-from pathlib import Path
-import xmltodict
-from pprint import pprint
 import yaml
 from BabelViscoFDTD.H5pySimple import ReadFromH5py
+from nibabel import affines, nifti1, processing
+from PIL import Image
+from PySide6.QtCore import Qt
+from skimage.metrics import (
+    mean_squared_error,
+    normalized_root_mse,
+    structural_similarity,
+)
 
-from glob import glob
-
+sys.path.append('./BabelBrain/')
+matplotlib.use('Agg')  # Use the 'Agg' backend, which is noninteractive
+np.random.seed(42) # RNG is same every time
 _IS_MAC = platform.system() == 'Darwin'
 
 def resource_path():  # needed for bundling
@@ -119,29 +120,16 @@ thermal_profiles = {
     'thermal_profile_3': test_data_folder + os.sep + 'Profiles' + os.sep + 'Thermal_Profile_3.yaml'
 }
 
-#we build the Tx list using the ui and Tx yaml files
-ListYAMLTx=glob(os.path.join(resource_path(),'..','BabelBrain','Babel_*/*.yaml'),recursive=True)
-pprint(ListYAMLTx)
+#we build the Tx list using TRANSDUCER_LIST and Tx yaml files
+transducer_list_yaml = os.path.join(resource_path(),'..','BabelBrain','SelFiles','transducer_list.yaml')
+with open(transducer_list_yaml,'r') as ftxlist:
+    TRANSDUCER_LIST = yaml.load(ftxlist,yaml.SafeLoader)
 
-with open(os.path.join(resource_path(),'..','BabelBrain','SelFiles','form.ui'),'r') as fui:
-    uistr=fui.read()
-uidict=xmltodict.parse(uistr)
-TxSelUI=uidict['ui']['widget']['widget'][2]['widget'][0]
-assert(TxSelUI['@name']== 'TransducerTypecomboBox')
 transducers=[]
-for n,txelem in enumerate(TxSelUI['item']):
-    name=txelem['property']['string']
-    selYaml=None
-    for sl in ListYAMLTx:
-        if name.replace('_','') in sl.replace('_',''):
-            selYaml=sl
-            break
-        elif name =='BSonix' and 'BSonix.yaml' in sl:
-            selYaml=sl
-            break
-    if selYaml is None:
-        print('missing',name)
-    assert(selYaml is not None)
+for n,tx in enumerate(TRANSDUCER_LIST):
+    name=tx['name']
+    selYaml=os.path.join(resource_path(),'..','BabelBrain','babel_transducers',tx['transducer_type'],tx['module_name'],'default.yaml')
+    assert(os.path.isfile(selYaml)), f"missing yaml for {name}: {selYaml}"
     with open(selYaml,'r') as ftx:
         TxConfig=yaml.load(ftx,yaml.SafeLoader)
     if name =='Single':
