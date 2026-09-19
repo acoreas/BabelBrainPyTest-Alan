@@ -5,7 +5,7 @@ import logging
 import pytest
 import nibabel
 
-from TranscranialModeling import BabelIntegrationBASE as BIBase
+from TranscranialModeling.babel_integration_templates import babel_integration_base as BIBase
 
 def test_SaveNiftiEnforcedISO(dataset,load_files,check_data,tmp_path):
 
