@@ -15,6 +15,7 @@ from pprint import pprint
 import h5py
 import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import nibabel
 import numpy as np
 import pytest
@@ -23,6 +24,7 @@ import pyvista as pv
 import SimpleITK as sitk
 import trimesh
 import yaml
+import uuid
 from BabelViscoFDTD.H5pySimple import ReadFromH5py
 from nibabel import affines, nifti1, processing
 from PIL import Image
@@ -425,9 +427,157 @@ def compare_data(get_rmse):
         logging.info(f"DICE Coefficient: {dice_coeff}")
         return dice_coeff
     
-    def h5_data(h5_ref_path,h5_test_path,node_screenshots,tolerance=0):
+    def h5_data(h5_ref_path,h5_test_path,node_screenshots,tolerance=0,label=None):
         mismatches = []
-        
+        scalar_results = []
+        array_results = []
+
+        VIEWER_MAX_FRAMES = 24
+
+        # Units for the fields saved in DataForSim-ThermalField-Duration*.h5 (see
+        # ThermalModeling/CalculateTemperatureEffects.py SaveDict); unknown fields fall
+        # back to no unit rather than guessing.
+        FIELD_UNITS = {
+            'p_map': 'Pa',
+            'TempEndFUS': '°C',
+            'FinalTemp': '°C',
+            'TI': '°C',
+            'TIC': '°C',
+            'TIS': '°C',
+            'DoseEndFUS': 'CEM43 min',
+            'FinalDose': 'CEM43 min',
+            'CEMBrain': 'CEM43 min',
+            'CEMSkin': 'CEM43 min',
+            'CEMSkull': 'CEM43 min',
+            'Isppa': 'W/cm$^2$',
+            'Ispta': 'W/cm$^2$',
+            'MaxIsppa': 'W/cm$^2$',
+            'MaxIspta': 'W/cm$^2$',
+            'MaterialMap': 'tissue ID',
+        }
+
+        def field_unit(name):
+            return FIELD_UNITS.get(name.split('/')[-1], '')
+
+        def make_volume_slice_viewer(vol1,vol2,diff_vol,title,dlabel,unit='',diff_unit=None):
+            if diff_unit is None:
+                diff_unit = f'Diff{dlabel}'
+            nz = vol1.shape[0]
+            n_frames = min(nz, VIEWER_MAX_FRAMES)
+            frame_indices = np.unique(np.linspace(0, nz - 1, n_frames).astype(int))
+
+            vmin=min(np.nanmin(vol1),np.nanmin(vol2))
+            vmax=max(np.nanmax(vol1),np.nanmax(vol2))
+            finite_diff = diff_vol[np.isfinite(diff_vol)]
+            dvmin = finite_diff.min() if finite_diff.size else 0
+            dvmax = finite_diff.max() if finite_diff.size else 1
+
+            # Degenerate/near-uniform ranges (e.g. a diff volume of near-identical floats)
+            # make matplotlib's default formatter print full-precision floats, which are
+            # long enough to get clipped off the saved image; cap tick labels to 3 sig figs.
+            tick_formatter = mticker.FormatStrFormatter('%.3g')
+
+            fig, axs = plt.subplots(1,3,figsize=(9,3),dpi=70)
+            im0=axs[0].imshow(vol1[frame_indices[0]],vmin=vmin,vmax=vmax)
+            axs[0].set_title('Reference')
+            cb0=plt.colorbar(im0,ax=axs[0],fraction=0.046)
+            cb0.ax.yaxis.set_major_formatter(tick_formatter)
+            cb0.set_label(unit)
+            im1=axs[1].imshow(vol2[frame_indices[0]],vmin=vmin,vmax=vmax)
+            axs[1].set_title('Test')
+            cb1=plt.colorbar(im1,ax=axs[1],fraction=0.046)
+            cb1.ax.yaxis.set_major_formatter(tick_formatter)
+            cb1.set_label(unit)
+            im2=axs[2].imshow(diff_vol[frame_indices[0]],vmin=dvmin,vmax=dvmax)
+            axs[2].set_title(f'Diff{dlabel}')
+            cb2=plt.colorbar(im2,ax=axs[2],fraction=0.046)
+            cb2.ax.yaxis.set_major_formatter(tick_formatter)
+            cb2.set_label(diff_unit)
+            for ax in axs:
+                ax.set_xlabel('X (voxels)')
+                ax.set_ylabel('Y (voxels)')
+            suptitle=fig.suptitle(f'{title}\nSlice {frame_indices[0]+1}/{nz}')
+            plt.tight_layout()
+
+            frames_b64 = []
+            for z in frame_indices:
+                im0.set_data(vol1[z])
+                im1.set_data(vol2[z])
+                im2.set_data(diff_vol[z])
+                suptitle.set_text(f'{title}\nSlice {z+1}/{nz}')
+                buffer = BytesIO()
+                fig.savefig(buffer,format='webp')
+                buffer.seek(0)
+                frames_b64.append(base64.b64encode(buffer.getvalue()).decode('utf-8'))
+            plt.close(fig)
+
+            wid = f"volviewer_{uuid.uuid4().hex[:8]}"
+            frames_json = '[' + ','.join(f'"{b}"' for b in frames_b64) + ']'
+            # pytest-html injects "extra" html via innerHTML at runtime, so <script>
+            # tags here would never execute. Everything below is wired through inline
+            # on*="" attributes instead, which the browser still activates on elements
+            # created via innerHTML. Frame data rides in a data-* attribute (single-quoted,
+            # so the embedded base64/JSON double quotes need no escaping) and is parsed
+            # once, then cached on the container element to avoid re-parsing per drag tick.
+            get_frames_js = (
+                f"var c=document.getElementById('{wid}');"
+                "if(!c._frames){c._frames=JSON.parse(c.dataset.frames);}"
+                "var frames=c._frames;"
+            )
+            show_slice_js = (
+                "var i=parseInt(this.value,10);"
+                f"document.getElementById('{wid}_img').src='data:image/webp;base64,'+frames[i];"
+                f"document.getElementById('{wid}_label').textContent='Slice '+(i+1)+'/'+frames.length;"
+            )
+            slider_oninput = get_frames_js + show_slice_js
+            play_onclick = (
+                get_frames_js +
+                f"var slider=document.getElementById('{wid}_slider');"
+                f"var img=document.getElementById('{wid}_img');"
+                f"var label=document.getElementById('{wid}_label');"
+                "if(c._timer){clearInterval(c._timer);c._timer=null;this.textContent='Play';return;}"
+                "this.textContent='Pause';"
+                "c._timer=setInterval(function(){"
+                "var v=(parseInt(slider.value,10)+1)%frames.length;"
+                "slider.value=v;"
+                "img.src='data:image/webp;base64,'+frames[v];"
+                "label.textContent='Slice '+(v+1)+'/'+frames.length;"
+                "},150);"
+            )
+            # The <img>'s onload fires every time its src is swapped (i.e. every frame),
+            # so it's guarded to only kick off autoplay once, the first time the widget's
+            # initial frame finishes loading (which happens even though it was inserted
+            # via innerHTML, same as the on*="" attributes above).
+            autoplay_onload = (
+                f"var c=document.getElementById('{wid}');"
+                "if(!c._autoplayStarted){"
+                "c._autoplayStarted=true;"
+                f"document.getElementById('{wid}_play').click();"
+                "}"
+            )
+            return f"""
+<div id='{wid}' data-frames='{frames_json}' style='text-align:center;margin:4px 0 12px 0'>
+  <img id='{wid}_img' src='data:image/webp;base64,{frames_b64[0]}' width='900' onload="{autoplay_onload}"><br>
+  <input type='range' id='{wid}_slider' min='0' max='{len(frames_b64)-1}' value='0' style='width:900px'
+    oninput="{slider_oninput}"><br>
+  <span id='{wid}_label'>Slice 1/{len(frames_b64)}</span>
+  <button type='button' id='{wid}_play' style='margin-left:8px' onclick="{play_onclick}">Play</button>
+</div>
+"""
+
+        section_title = label if label else os.path.basename(os.path.dirname(h5_ref_path))
+        node_screenshots.append({
+            'kind': 'html',
+            'html': (
+                f"<h3>{section_title}</h3>"
+                f"<div style='font-size:12px;color:#555'>"
+                f"Reference file: {h5_ref_path}<br>"
+                f"Test file: {h5_test_path}<br>"
+                f"Tolerance (rtol): {tolerance}"
+                f"</div>"
+            )
+        })
+
         def compare_items(name, obj1):
             logging.info(f"Comparing {name}")
             if name not in f2:
@@ -442,83 +592,180 @@ def compare_data(get_rmse):
                     if np.any(np.array(data1.shape)!=np.array(data2.shape)):
                         bCorrectShape=False
                         logging.warning(f"Dataset {name} differs in data shapes with {data1.shape} and {data2.shape}")
-                        mismatches.append(name)
 
                 tolerancepass=False
                 if bCorrectShape:
                     if type(data1) == bytes or type(data2)==bytes:
-                        tolerancepass = data1==data2
+                        def _as_float(v):
+                            try:
+                                return float(v.decode() if isinstance(v, bytes) else v)
+                            except (TypeError, ValueError):
+                                return None
+                        num1, num2 = _as_float(data1), _as_float(data2)
+                        if num1 is not None and num2 is not None:
+                            tolerancepass = np.isclose(num1, num2, rtol=tolerance, atol=0, equal_nan=True)
+                        else:
+                            tolerancepass = data1==data2
                     else:
                         if np.isdtype(data1.dtype, "unsigned integer"):
                             data1 = data1.astype(np.float32)
                             data2 = data2.astype(np.float32)
                         tolerancepass=np.allclose(data1, data2, rtol=tolerance, atol=0, equal_nan=True)
 
-                if tolerance==0 or not tolerancepass:
-                        if data1.size > 1:
-                            if len(data1.shape)==3: #we save some screenshots of projection of error
-                                if bCorrectShape:
-                                    if np.issubdtype(data1.dtype, np.integer):
-                                        diff=np.max(np.abs(data2-data1),axis=0)
-                                        dlabel=''
-                                        logging.warning(f"Dataset {name} differs with maximal diff of {diff.max()} (int)")
-                                    else:
-                                        nmrse=normalized_root_mse(data1,data2,normalization='min-max')
-                                        diff=np.abs(data2-data1)
-                                        diffMax=diff.max()
-                                        diff[data1==0.0]=0
-                                        diff[data1!=0.0]/=data1[data1!=0]
-                                        diff=np.max(diff,axis=0) #MIP projection
-                                        dlabel=' %'
-                                        logging.warning(f"Dataset {name} differs with maximal diff of {diffMax} ({diff.max()*100} %) and NRMSE {nmrse}")
-                                        if (diff.max()-diff.min())>100:
-                                            diff[diff!=0]=np.log10(diff[diff!=0])
-                                            diff[diff==0]=np.nan
-                                        else:
-                                            diff*=100
-                            
-                                    plt.figure()
-                                    plt.imshow(diff)
-                                    plt.colorbar()
-                                    fn=h5_ref_path.split(os.sep)[-2].split('CT-')[1].split('kHz')[0]
-                                    plt.title(f'{fn}\nMIP diff {dlabel} {name} Tol={tolerance}')
-                                    # Save the plot to a BytesIO object
-                                    buffer = BytesIO()
-                                    plt.savefig(buffer, format='webp')
-                                    buffer.seek(0)
-                                    
-                                    # Encode the image data as base64 string
-                                    base64_plot = base64.b64encode(buffer.getvalue()).decode('utf-8')
-                                    node_screenshots.append(base64_plot)
-                                    plt.close('all')
-                                if name =='TempEndFUS':
-                                    Location =refH5Simple1['TargetLocation']
-                                    MTT1=data1[Location[0],Location[1],Location[2]]
-                                    Location =refH5Simple2['TargetLocation']
-                                    MTT2=data2[Location[0],Location[1],Location[2]]
-                                    logging.warning(f'MTT: {MTT1} vs {MTT2}')
-                                if name == 'p_map':
-                                    Location =refH5Simple1['TargetLocation']
-                                    p1=data1[Location[0],Location[1],Location[2]]
-                                    Location =refH5Simple2['TargetLocation']
-                                    p2=data2[Location[0],Location[1],Location[2]]
-                                    logging.warning(f'Pressure at target: {p1} vs {p2}')
-                                
+                # Stats are always collected (for every variable, matched or not) so the
+                # report can show a complete side-by-side table, not just the mismatches.
+                is_bytes = isinstance(data1, bytes) or isinstance(data2, bytes)
+                if not is_bytes and data1.size > 1:
+                    if len(data1.shape)==3: #we save an animated scan through the volume of the error
+                        if bCorrectShape:
+                            unit = field_unit(name)
+                            if np.issubdtype(data1.dtype, np.integer):
+                                diff3d=np.abs(data2.astype(np.float64)-data1.astype(np.float64))
+                                dlabel=''
+                                diff_unit = f'{unit} (abs diff)' if unit else 'abs diff'
+                                mean_abs_diff=diff3d.mean()
+                                array_results.append((name, str(data1.shape), str(data2.shape), diff3d.max(), mean_abs_diff, None, None, tolerancepass))
+                                if not tolerancepass:
+                                    logging.warning(f"Dataset {name} differs with maximal diff of {diff3d.max()} (int)")
                             else:
-                                logging.warning(f"Dataset {name} differs")   
+                                nmrse=normalized_root_mse(data1,data2,normalization='min-max')
+                                diff3d=np.abs(data2-data1)
+                                diffMax=diff3d.max()
+                                mean_abs_diff=diff3d.mean()
+                                diff3d[data1==0.0]=0
+                                diff3d[data1!=0.0]/=np.abs(data1[data1!=0])
+                                max_rel_diff_pct=diff3d.max()*100
+                                dlabel=' %'
+                                array_results.append((name, str(data1.shape), str(data2.shape), diffMax, mean_abs_diff, max_rel_diff_pct, nmrse, tolerancepass))
+                                if not tolerancepass:
+                                    logging.warning(f"Dataset {name} differs with maximal diff of {diffMax} ({max_rel_diff_pct} %) and NRMSE {nmrse}")
+                                if (diff3d.max()-diff3d.min())>100:
+                                    diff3d[diff3d!=0]=np.log10(diff3d[diff3d!=0])
+                                    diff3d[diff3d==0]=np.nan
+                                    diff_unit = 'log10(% diff)'
+                                else:
+                                    diff3d*=100
+                                    diff_unit = '% diff'
+
+                            if not tolerancepass:
+                                try:
+                                    fn=h5_ref_path.split(os.sep)[-2].split('CT-')[1].split('kHz')[0]
+                                except IndexError:
+                                    fn=h5_ref_path.split(os.sep)[-2]
+
+                                viewer_html = make_volume_slice_viewer(data1,data2,diff3d,title=f'{fn}\n{name}  Tol={tolerance}',dlabel=dlabel,unit=unit,diff_unit=diff_unit)
+                                node_screenshots.append({'kind': 'html','html': f"<div><strong>{name}</strong> &mdash; drag the slider or press Play to scan through the volume</div>{viewer_html}"})
                         else:
-                            logging.warning(f"Dataset {name} differs: {data1} vs {data2}")
-                        mismatches.append(name)
-                logging.info(f"{name} matches")
+                            logging.warning(f"Dataset {name} differs in shape: {data1.shape} vs {data2.shape}")
+                            array_results.append((name, str(data1.shape), str(data2.shape), None, None, None, None, False))
+                        if name =='TempEndFUS' and not tolerancepass:
+                            Location =refH5Simple1['TargetLocation']
+                            MTT1=data1[Location[0],Location[1],Location[2]]
+                            Location =refH5Simple2['TargetLocation']
+                            MTT2=data2[Location[0],Location[1],Location[2]]
+                            logging.warning(f'MTT: {MTT1} vs {MTT2}')
+                        if name == 'p_map' and not tolerancepass:
+                            Location =refH5Simple1['TargetLocation']
+                            p1=data1[Location[0],Location[1],Location[2]]
+                            Location =refH5Simple2['TargetLocation']
+                            p2=data2[Location[0],Location[1],Location[2]]
+                            logging.warning(f'Pressure at target: {p1} vs {p2}')
+
+                    else:
+                        if bCorrectShape:
+                            diff_arr = np.abs(data2.astype(np.float64) - data1.astype(np.float64))
+                            max_abs_diff = diff_arr.max()
+                            mean_abs_diff = diff_arr.mean()
+                            nonzero = data1 != 0
+                            max_rel_diff_pct = float(np.abs(diff_arr[nonzero] / data1[nonzero]).max() * 100) if np.any(nonzero) else None
+                            try:
+                                nrmse = normalized_root_mse(data1, data2, normalization='min-max')
+                            except Exception:
+                                nrmse = None
+                            if not tolerancepass:
+                                logging.warning(
+                                    f"Dataset {name} differs with maximal diff of {max_abs_diff:.6g}"
+                                    + (f" ({max_rel_diff_pct:.4g}%)" if max_rel_diff_pct is not None else "")
+                                    + (f" and NRMSE {nrmse:.6g}" if nrmse is not None else "")
+                                )
+                            array_results.append((name, str(data1.shape), str(data2.shape), max_abs_diff, mean_abs_diff, max_rel_diff_pct, nrmse, tolerancepass))
+                        else:
+                            logging.warning(f"Dataset {name} differs in shape: {data1.shape} vs {data2.shape}")
+                            array_results.append((name, str(data1.shape), str(data2.shape), None, None, None, None, False))
+                else:
+                    abs_diff = None
+                    rel_diff_pct = None
+                    try:
+                        abs_diff = abs(float(data2) - float(data1))
+                        if float(data1) != 0:
+                            rel_diff_pct = abs_diff / abs(float(data1)) * 100
+                    except (TypeError, ValueError):
+                        pass
+                    if not tolerancepass:
+                        logging.warning(f"Dataset {name} differs: {data1} vs {data2}"
+                                         + (f" (abs diff={abs_diff:.6g}"
+                                            + (f", rel diff={rel_diff_pct:.4g}%)" if rel_diff_pct is not None else ")")
+                                            if abs_diff is not None else ""))
+                    scalar_results.append((name, data1, data2, abs_diff, rel_diff_pct, tolerancepass))
+
+                if not tolerancepass:
+                    mismatches.append(name)
+                else:
+                    logging.info(f"{name} matches")
             elif isinstance(obj1, h5py.Group):
                 pass  # groups are containers, children checked recursively
-                
+
         refH5Simple1=ReadFromH5py(h5_ref_path)
         refH5Simple2=ReadFromH5py(h5_test_path)
-        
+
         with h5py.File(h5_ref_path, "r") as f1, h5py.File(h5_test_path, "r") as f2:
             exact_match = f1.visititems(lambda name, obj: compare_items(name, obj1=obj))
-            
+
+        def _fmt(v, spec='.6g'):
+            return format(v, spec) if v is not None else 'n/a'
+
+        def _row_style(matched):
+            color = '#c6f6c6' if matched else '#f6c6c6'
+            return f"style='background-color:{color}'"
+
+        if scalar_results:
+            rows = ''.join(
+                f"<tr {_row_style(matched)}>"
+                f"<td>{name}</td><td>{ref_val}</td><td>{test_val}</td>"
+                f"<td>{_fmt(abs_diff)}</td>"
+                f"<td>{_fmt(rel_diff_pct, '.4g') + '%' if rel_diff_pct is not None else 'n/a'}</td>"
+                "</tr>"
+                for name, ref_val, test_val, abs_diff, rel_diff_pct, matched in scalar_results
+            )
+            table_html = (
+                "<table border='1' style='border-collapse:collapse;font-size:12px'>"
+                "<tr><th>Variable</th><th>Reference</th><th>Test</th><th>Abs diff</th><th>Rel diff</th></tr>"
+                f"{rows}</table>"
+            )
+            node_screenshots.append({'kind': 'html', 'html': table_html})
+
+        if array_results:
+            rows = ''.join(
+                f"<tr {_row_style(matched)}>"
+                f"<td>{name}</td><td>{ref_shape}</td><td>{test_shape}</td>"
+                f"<td>{_fmt(max_abs_diff)}</td>"
+                f"<td>{_fmt(mean_abs_diff)}</td>"
+                f"<td>{_fmt(max_rel_diff_pct, '.4g') + '%' if max_rel_diff_pct is not None else 'n/a'}</td>"
+                f"<td>{_fmt(nrmse)}</td>"
+                "</tr>"
+                for name, ref_shape, test_shape, max_abs_diff, mean_abs_diff, max_rel_diff_pct, nrmse, matched in array_results
+            )
+            table_html = (
+                "<table border='1' style='border-collapse:collapse;font-size:12px'>"
+                "<tr><th>Variable</th><th>Reference shape</th><th>Test shape</th>"
+                "<th>Max abs diff</th><th>Mean abs diff</th><th>Max rel diff</th><th>NRMSE</th></tr>"
+                f"{rows}</table>"
+            )
+            node_screenshots.append({'kind': 'html', 'html': table_html})
+
+        if len(mismatches) == 0:
+            node_screenshots.append({'kind': 'html', 'html': "<div style='color:green'>All datasets match within tolerance</div>"})
+
         return len(mismatches) == 0
     
     def mse(output_array,truth_array):
@@ -1125,11 +1372,33 @@ def pytest_runtest_makereport(item,call):
 
         # Add saved screenshots to html report
         if hasattr(item, 'screenshots'):
-            img_tags = ''
-            for screenshot in item.screenshots:
-                img_tags += "<td><img src='data:image/webp;base64,{}' width='500'>></td>".format(screenshot)
-            extras.append(pytest_html.extras.html(f"<tr>{img_tags}</tr>"))
-            
+            html_parts = []
+            row_tags = ''
+
+            def flush_row():
+                nonlocal row_tags
+                if row_tags:
+                    html_parts.append(f"<tr>{row_tags}</tr>")
+                    row_tags = ''
+
+            for entry in item.screenshots:
+                if isinstance(entry, dict):
+                    kind = entry.get('kind', 'image')
+                    if kind == 'html':
+                        flush_row()
+                        html_parts.append(f"<tr><td colspan='10'>{entry['html']}</td></tr>")
+                    else:
+                        caption = entry.get('caption')
+                        caption_html = f"<div style='text-align:center;font-size:12px'>{caption}</div>" if caption else ''
+                        width = entry.get('width', 500)
+                        mime = entry.get('mime', 'webp')
+                        row_tags += f"<td><img src='data:image/{mime};base64,{entry['image']}' width='{width}'>{caption_html}</td>"
+                else:
+                    # Legacy entries: plain base64-encoded webp strings
+                    row_tags += "<td><img src='data:image/webp;base64,{}' width='500'></td>".format(entry)
+            flush_row()
+            extras.append(pytest_html.extras.html(''.join(html_parts)))
+
         report.extras = extras
 
 @pytest.hookimpl()

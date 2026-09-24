@@ -208,6 +208,8 @@ pytest -k "test_full_pipeline_two_outputs"
 
 This will also run tests for different tolerances (e.g. 0%,1%,5%) which you can specify (same as previous section). Note that we don't include the "basic_babelbrain_params" marker since it should be used when generating the outputs beforehand.
 
+The html report breaks the comparison down by matching subfolder (i.e. one section per compared parameter set/device), each showing the reference and test file paths and tolerance used. For any mismatched 3D field, it embeds an interactive slice viewer (reference, test, and diff side by side, sharing a fixed color scale across slices) with a slider you can drag to any slice, plus a Play/Pause button to auto-scan through the volume — all self-contained in the html file, no server needed. To keep report size/generation time reasonable, each viewer samples up to 24 slices spread evenly across the volume rather than every slice. Mismatched single-value variables (e.g. scalar summary metrics) are listed in a table with their reference/test values and absolute/relative differences.
+
 ## Running a BabelBrain Generating_Outputs "Test"
 The test_generate_valid_outputs "test" is used not to check BabelBrain proper functionality, but to leverage pytest and qtbot to automatically generate outputs for various BabelBrain parameters to be used later in regression tests.
 

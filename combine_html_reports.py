@@ -51,7 +51,14 @@ def render_extras(extras):
         name = extra.get("name") or ""
         label = f'<div class="extra-name">{htmllib.escape(name)}</div>' if name else ""
         if fmt == "html":
-            inner = re.sub(r"</?tr[^>]*>|</?td[^>]*>", "", content)
+            # Extras built from <tr> rows (e.g. screenshot rows, or the per-file
+            # sections/slice viewers/nested comparison tables that
+            # test_full_pipeline_two_outputs emits) need a table around them.
+            # Stripping the tr/td tags instead would also flatten any nested tables.
+            if re.match(r"\s*<tr[\s>]", content, flags=re.IGNORECASE):
+                inner = f'<table class="extra-table">{content}</table>'
+            else:
+                inner = content
             parts.append(f'<div class="extra-item">{label}{inner}</div>')
         elif fmt in ("image", "png", "jpg", "jpeg", "gif", "svg"):
             parts.append(f'<div class="extra-item">{label}<img src="{content}" /></div>')
@@ -230,12 +237,16 @@ def combine_html_files(input_directory, output=None):
   {shared_css}
   <style>
     .extra-item {{ margin: 6px 0; }}
-    .extra-item img {{ max-width: 100%; display: block; }}
+    .extra-item img {{ max-width: 100%; }}
+    .extra-item input[type=range] {{ max-width: 100%; }}
+    .extra-table {{ border-collapse: collapse; }}
+    .extra-table > tbody > tr > td {{ padding: 2px 4px; vertical-align: top; }}
+    .extra-table h3 {{ margin: 12px 0 4px 0; }}
     .extra-name {{ font-weight: bold; font-size: 11px; color: #555; margin-bottom: 3px; }}
 
     .hidden {{ display: none !important; }}
 
-    tr.extras-row td {{ padding: 8px; background: #f9f9f9; }}
+    tr.extras-row > td.extra {{ padding: 8px; background: #f9f9f9; }}
 
     #environment {{ margin-bottom: 20px; }}
     #environment td {{
