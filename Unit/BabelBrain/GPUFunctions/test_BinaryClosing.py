@@ -1,15 +1,27 @@
 import logging
 import re
 
-import nibabel
 import numpy as np
 import pytest
 from scipy import ndimage
 
 from BabelBrain.GPUFunctions.GPUBinaryClosing import BinaryClosing
 
+def binary_closing_box(mask,size):
+    """scipy binary_closing with a box structuring element of `size`, done as one 1D dilation and
+    erosion per axis. The result is identical to ndimage.binary_closing(mask, np.ones(size)) but
+    the cost grows with the box side instead of its volume, which keeps the CPU reference practical
+    at high resolutions (e.g. a 54^3 box at Stress_Res)."""
+    out = mask
+    for operation in (ndimage.binary_dilation, ndimage.binary_erosion):
+        for axis in range(3):
+            line = [1, 1, 1]
+            line[axis] = size[axis]
+            out = operation(out, structure=np.ones(line, dtype=bool))
+    return out
+
 @pytest.mark.step1
-def test_BinaryClosing_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_gpu_device,load_files,get_resampled_input,get_mpl_plot,compare_data,request):
+def test_BinaryClosing_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_gpu_device,load_files,get_resampled_input,cached_cpu_truth,gpu_vs_cpu_plot,compare_data,request):
         
     # Parameters
     input_folder = dataset['folder_path']
@@ -43,23 +55,15 @@ def test_BinaryClosing_vs_CPU(computing_backend,dataset,spatial_step,check_os,ge
     # Run binary closing step
     logging.info('Running binary closing step via GPU')
     data_binary_closing_gpu = BinaryClosing.BinaryClose(bone_mask, structure=np.ones(filter_size,dtype=int), GPUBackend=computing_backend['type'])
-    try:
-        logging.info('Reloading binary closing truth')
-        nifti_binary_closing_cpu = load_files([output_fnames['Output_Truth']],skip_test=False)[0]
-        data_binary_closing_cpu = nifti_binary_closing_cpu.get_fdata()
-    except:
-        logging.info("File doesn't exist")
-        logging.info('Generating binary closing truth')
-        data_binary_closing_cpu = ndimage.binary_closing(bone_mask,structure=np.ones(filter_size,dtype=int))
-        nifti_binary_closing_cpu = nibabel.Nifti1Image(data_binary_closing_cpu.astype(np.float32),resampled_nifti.affine)
-        logging.info('Saving file for future use')
-        nibabel.save(nifti_binary_closing_cpu,output_fnames['Output_Truth'])
+    data_binary_closing_cpu = cached_cpu_truth(output_fnames['Output_Truth'],
+                                               lambda: binary_closing_box(bone_mask,filter_size),
+                                               affine=resampled_nifti.affine)
 
     # Save plot screenshot to be added to html report later
     request.node.screenshots = []
     plots = [resampled_data,bone_mask,data_binary_closing_cpu,data_binary_closing_gpu]
     plot_names = ['Resampled Data', 'Bone Mask', 'CPU Binary Closing\nOutput (Truth)', 'GPU Binary\nClosing Output']
-    screenshot = get_mpl_plot(plots, axes_num=3,titles=plot_names,color_map='gray')
+    screenshot = gpu_vs_cpu_plot(plots,plot_names,data_binary_closing_cpu,data_binary_closing_gpu)
     request.node.screenshots.append(screenshot)
     
     # Calculate dice coefficient

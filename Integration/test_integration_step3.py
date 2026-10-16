@@ -1,7 +1,3 @@
-import os
-import glob
-import logging
-
 import pytest
 
 @pytest.mark.step3

@@ -29,23 +29,22 @@ which would run available tests for all the functions inside FileManager.py (ass
 **Important to note that some unit tests are parameterized** 
 
 **Example**  
-test_nibabel_to_sitk relies on T1 data and thus is parameterized for image datasets (e.g. SDR_0p31, SDR_0p42, etc.) Runnning
+test_nibabel_to_sitk relies on T1 data and thus is parameterized for image datasets (ID_0082 and ernie). Runnning
 
 ```bash
 pytest -k "test_nibabel_to_sitk"
 ```
 will collect/run for all datasets so tests ran would be:
-- test_nibabel_to_sitk[SDR_0p31]
-- test_nibabel_to_sitk[SDR_0p42]
-- etc.
+- test_nibabel_to_sitk[ID_0082]
+- test_nibabel_to_sitk[ernie]
 
 Therefore to run a specific dataset, simply specify the dataset like so
 ```bash
-pytest -k "test_nibabel_to_sitk[SDR_0p31]"
+pytest -k "test_nibabel_to_sitk[ID_0082]"
 ```
 or
 ```bash
-pytest -k "test_nibabel_to_sitk and SDR_0p31"
+pytest -k "test_nibabel_to_sitk and ID_0082"
 ```
 
 In general, running all the different parameters will not take too long to run. The exception being pytests for GPU functions.
@@ -57,7 +56,19 @@ GPU unit tests are parameterized for spatial step
 - high_res
 - stress_res
 
-where high_res and stress_res are **much slower** to run due to higher resolution sims. Note that tests for GPU function are marked with the "gpu" marker. That is, to collect/run all GPU unit tests, run the following command:
+where high_res and stress_res are **much slower** to run due to higher resolution sims. Every spatial step runs on the real datasets (ID_0082, ernie) and on a small synthetic head (dataset id `synthetic`, generated automatically by [synthetic_dataset.py](synthetic_dataset.py) into the gitignored `Tests/.cache` folder), which makes the high resolutions practical. Release testing only runs the real datasets at medium_res (`RELEASE_REAL_DATASET_SPATIAL_STEPS` in [parameters.py](parameters.py)); their other resolutions are marked `release_exclude`, so
+
+```bash
+pytest Tests/Unit -m "gpu and not release_exclude"
+```
+
+runs the release set, and the real datasets at high resolution can still be selected explicitly, e.g. `pytest Tests/Unit -k "ID_0082-High_Res and Metal"`. Each GPU test's report entry shows the inputs, the CPU and GPU outputs and a |GPU - CPU| difference panel (maximum over the volume, with the number of differing voxels); the voxelization test plots the voxels only one of them found.
+
+For a quick check on your machine's backend:
+
+```bash
+pytest Tests/Unit -m "gpu and not slow" -k "synthetic and Metal"
+``` Note that tests for GPU function are marked with the "gpu" marker. That is, to collect/run all GPU unit tests, run the following command:
 
 ```bash
 pytest -k "unit" -m "gpu"
@@ -95,23 +106,23 @@ Similar to above, replace "step1" with the appropriate tag for whatever step you
 
 ## Running a BabelBrain E2E Test
 ### Background
-End-to-End Tests run the full BabelBrain pipeline and are parametrized based on:
+End-to-End Tests run the full BabelBrain pipeline and are parametrized based on (values defined in [parameters.py](parameters.py); options that the BabelBrain version under test doesn't offer are left out):
 - Trajectory type
-    - Slicer
-    - Brainsight
+    - brainsight
+    - slicer
+    - localite
 - Target Location
-    - Deep_Target
-    - Superficial_Target
-    - Skull_Target
+    - Superficial_Target_Left
+    - Deep_Target_Left
 - CT Scan file
     - NONE
     - CT
     - ZTE
     - PETRA
+    - Density
 - Patient Dataset
-    - SDR_0p31
-    - SDR_0p42
-    - ...
+    - ID_0082
+    - ernie
 - Transducer
     - Single
     - CTX_500
@@ -132,26 +143,27 @@ End-to-End Tests run the full BabelBrain pipeline and are parametrized based on:
 Therefore, a single BabelBrain full pipeline test could have upwards of 100000+ versions and would not be feasible to run all of them. The user can narrow down what set of tests they want to run by specifying the parameters when calling the test  
 
 **Example**  
-A test_full_pipeline_normal test focused only on a deep target created using slicer for patient SDR_0p31 while using no CT data/substitute, a single tx @ 200 kHz, and a CUDA backend could be specified as follows:
+A test_full_pipeline_normal test focused only on a deep target created using slicer for patient ernie while using no CT data/substitute, a single tx @ 200 kHz, and a CUDA backend could be specified as follows:
 
 ```bash
-pytest -k "test_full_pipeline_normal and slicer and Deep_Target and SDR_0p31 and NONE and Single and 200kHz and CUDA"
+pytest -k "test_full_pipeline_normal and slicer and Deep_Target_Left and ernie and NONE and Single and 200kHz and CUDA"
 ```
 
 While this works, we've introduced the `basic_babelbrain_params` marker which grabs tests with the following parameter combinations:
+- Trajectory type
+    - brainsight
 - Target Location
-    - Deep_Target
+    - Deep_Target_Left
 - CT Scan file
     - NONE
     - CT
     - ZTE
 - Patient Dataset
     - ID_0082 (contains both CT and ZTE data)
-- Transducer
-    - H317
-- Frequency
-    - 250 kHz (low frequency)
-    - 825 kHz (high frequency)
+- Transducer / Frequency
+    - Every transducer at all its frequencies, except Single (500 kHz), CTX_500 (500 kHz), H317 (250 and 825 kHz) and REMOPD (490 kHz)
+
+The transducer/frequency choices of this and the other `*_babelbrain_params` markers are in `MARKER_TRANSDUCERS` in [parameters.py](parameters.py). Transducers not listed there are included automatically, so new transducers are covered without editing the tests.
 
 Which provides good coverage of BabelBrain user cases while being more manageable to run. Note that the trajectory type and GPU Backend still need to be specified by the user or can be left empty and tests will be skipped if they cannot be run on the user's current system.
 
@@ -240,6 +252,15 @@ This "test" can be run with the following command:
 ```bash
 pytest -k "test_generate_valid_outputs" -m "basic_babelbrain_params"
 ```
+
+Each case is saved in `<gen_output_folder>/<case id>` together with a `pytest_case_complete.yaml` marker written once the run succeeded. A later run skips cases already generated by the same BabelBrain commit with the same trajectory and thermal profile files, and reruns (from an empty folder) anything else, including folders from a run that crashed halfway. Set `BABEL_PYTEST_REGENERATE=1` to rerun every case.
+
+## Release testing
+The tests required for minor and major releases (regression, E2E and the PlanTUS unit test) are described in [BabelBrain_Pytest_Usage.md](BabelBrain_Pytest_Usage.md). The regression tests in [Regression](Regression) generate their outputs first (`test_generate_*`, marked `generate_outputs`) and then compare them against `<ref_output_folder_1>/<suite>/<case id>`, so a failed comparison never throws away a finished simulation. To create references, check out the reference BabelBrain version, point `gen_output_folder` at the reference location and run:
+```bash
+pytest Tests/Regression -m generate_outputs
+```
+Tests for features an older BabelBrain version doesn't have (remote servers, custom transducers, PlanTUS) are skipped automatically.
 
 ## Isolating a pytest run (crash and memory triage)
 

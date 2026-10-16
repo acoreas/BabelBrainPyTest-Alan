@@ -1,13 +1,8 @@
 import hashlib
-import os
-import sys
 import logging
 from unittest import mock
 
 import pytest
-import nibabel
-import numpy as np
-import SimpleITK as sitk
 
 @pytest.mark.step1
 class TestFileManager:

@@ -1,8 +1,6 @@
-import os
-import glob
-import logging
-
 import pytest
+
+from Tests.parameters import INVALID_TARGETS
 
 @pytest.mark.step1
 @pytest.mark.skip(reason="Placeholder test")
@@ -19,6 +17,7 @@ class TestStep1:
 
         pass
 
+    @pytest.mark.parametrize('trajectory', list(INVALID_TARGETS))
     def test_step1_invalid_case(self,qtbot,trajectory,transducer,scan_type,dataset,babelbrain_widget,tmp_path):
 
         # Run Step 1

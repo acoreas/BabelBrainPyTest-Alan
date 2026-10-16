@@ -1,11 +1,11 @@
-import os
-import sys
 import logging
+import os
 
-import pytest
 import nibabel
+import pytest
 
-from TranscranialModeling.babel_integration_templates import babel_integration_base as BIBase
+# Module added after v0.8.1, skip on versions that don't have it
+BIHelpers = pytest.importorskip('TranscranialModeling.babel_integration.babel_integration_helpers')
 
 def test_SaveNiftiEnforcedISO(dataset,load_files,check_data,tmp_path):
 
@@ -16,7 +16,7 @@ def test_SaveNiftiEnforcedISO(dataset,load_files,check_data,tmp_path):
     # Run SaveNiftiEnforcedISO
     output_fname_initial = str(tmp_path) + os.sep + 'T1W-isotropic__.nii.gz'
     output_fname_final = str(tmp_path) + os.sep + 'T1W-isotropic.nii.gz'
-    BIBase.SaveNiftiEnforcedISO(input_data['T1W'], output_fname_initial)
+    BIHelpers.SaveNiftiEnforcedISO(input_data['T1W'], output_fname_initial)
 
     # Check intermediate files are deleted
     intermediate_files = [output_fname_initial.split('.gz')[0], output_fname_final.split('.gz')[0]]

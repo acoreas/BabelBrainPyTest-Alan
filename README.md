@@ -64,9 +64,15 @@ BabelBrain/
 │     └── ...
 ├── Tests/
 │     ├── config.ini
-│     ├── conftest.py
+│     ├── conftest.py               (fixtures and default parametrization)
+│     ├── parameters.py             (datasets, targets, profiles, transducers, release test matrix)
+│     ├── pipeline_helpers.py       (set up, run and compare BabelBrain pipelines)
+│     ├── test_suite_consistency.py (checks parameters.py still matches BabelBrain and the test data)
+│     ├── Profiles/                 (pytest thermal profiles)
 │     ├── E2E/
+│     ├── Generate_Outputs/
 │     ├── Integration/
+│     ├── Regression/
 │     ├── Unit/
 │     │    ├── BabelBrain/
 │     │    │    ├── test_BabelBrain.py
@@ -162,10 +168,14 @@ Certain tests require a directory containing test data, GPU device name, etc. Th
 data_folder_path  = <path to test data>
 ref_output_folder_1 = <path to reference BabelBrain output data set 1>
 ref_output_folder_2 = <path to reference BabelBrain output data set 2>
-gen_output_folder = <path to folder to store outputs from test_generate_outputs.py>
+gen_output_folder = <path to folder to store outputs from generate_outputs tests>
+simnibs_root_path = <path to SimNIBS install (optional)>
 
 [GPU]
 device_name = <GPU device name> 
+
+[Remote]   # optional, see example_config.ini
+host = <server address>
 ```
 
 Where the
@@ -176,34 +186,36 @@ Where the
 
 `ref_output_folder_2` folder contains another previously generated BabelBrain outputs. Used when you want to compare two already generated ouput folders.
 
-`gen_output_folder` folder is where output data generated from Generate_Outputs "Tests" will be stored
+`gen_output_folder` folder is where output data generated from the generate_outputs tests will be stored
 
-Note that your `data_folder_path` folder should have the following structure which is slightly modified from our current [image database](https://zenodo.org/records/7894431). We are still in the process of generating our truth data, therefore you will need to create your own to run the tests.
+`simnibs_root_path` is the SimNIBS install folder (the one containing `simnibs_env`). Only needed by the soft tissue segmentation regression cases and the PlanTUS test, which are skipped without it
+
+The optional `[Remote]` section points the remote server E2E test at an existing BabelBrain job server; without it the test starts a local one
+
+Note that your `data_folder_path` folder should have the following structure. We are still in the process of sharing our test data, therefore you will need to create your own to run the tests.
 
 <pre>
 BabelBrain_Test_Data/
-├── &lt;Dataset_1&gt;/
-│     ├── m2m_&lt;Dataset_1&gt;/
-│     │     ├── final_tissues.nii.gz
-│     │     └── ...
-│     ├── Trajectories/
-│     │     ├── &lt;Deep_Target&gt;.txt
-│     │     ├── &lt;Superficial_Target&gt;.txt
-│     │     ├── &lt;Skin_Target&gt;.txt
-│     │     └── &lt;Outside_Target&gt;.txt
-│     ├── &lt;Truth_file_1&gt;
-│     └── &lt;Truth_file_2&gt;
-├── &lt;Dataset_2&gt;/
-│     └── ...
-├── Profiles/
-│     ├── Thermal_Profile_1.yaml
-│     ├── Thermal_Profile_2.yaml
-│     ├── MultiFocus_Profile1.yaml
-│     └── ...
-└── ...
+├── ID_0082/
+│     ├── m2m_ID_0082/            (charm output, incl. final_tissues.nii.gz and the .msh mesh)
+│     ├── T1W.nii.gz
+│     ├── CT.nii.gz
+│     ├── ZTE.nii.gz
+│     └── ...                     (PETRA.nii.gz / Density.nii.gz if available)
+├── ernie/
+│     └── m2m_ernie/              (charm output, T1 is m2m_ernie/T1.nii.gz)
+└── Trajectories/
+      ├── &lt;type&gt;_&lt;dataset&gt;_superficial_target_left.txt
+      ├── &lt;type&gt;_&lt;dataset&gt;_deep_target_left.txt
+      ├── &lt;type&gt;_&lt;dataset&gt;_superficial_target_right.txt
+      ├── &lt;type&gt;_&lt;dataset&gt;_deep_target_right.txt
+      ├── &lt;type&gt;_&lt;dataset&gt;_superficial_targets.txt   (combined, .yaml for slicer)
+      └── &lt;type&gt;_&lt;dataset&gt;_deep_targets.txt         (combined, .yaml for slicer)
 </pre>
 
-The names of datasets, trajectories, and transducers can be modified in the parameters section in the [conftest.py](conftest.py) file.
+where `<type>` is brainsight, slicer or localite (.xml). The GPU unit tests additionally use a small synthetic head that is generated automatically (see [synthetic_dataset.py](synthetic_dataset.py)), so it doesn't need to be in the data folder. The thermal profiles used by the tests are kept in this repo's [Profiles](Profiles) folder and the multipoint profile comes from BabelBrain's own `Profiles` folder.
+
+Datasets, targets, profiles and the release test matrix are defined in [parameters.py](parameters.py). Transducers, their frequencies and the drop-down options are read from the BabelBrain checkout under test, so new ones are picked up automatically. Run `pytest Tests/test_suite_consistency.py` (no GPU needed, a few seconds) to check that the test parameters still match BabelBrain and that the test data is in place.
 
 # Further Reading
 For more information about pytest and its features, check out the [pytest documentation](https://docs.pytest.org/en/latest/).

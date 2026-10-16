@@ -1,10 +1,6 @@
-import os
-import sys
-import logging
-
-import pytest
 import nibabel
 import numpy as np
+import pytest
 
 from BabelBrain import BabelBrain
 
@@ -16,7 +12,7 @@ def test_save_T1W_iso(dataset,load_files,check_data,get_mpl_plot,compare_data,tm
     input_data = load_files(input_files)
 
     # Run save_T1W_iso function
-    output_fname= dataset['T1_iso_path']
+    output_fname = str(tmp_path / 'T1W-isotropic.nii.gz')
     BabelBrain.save_T1W_iso(input_files['T1W'], output_fname)
 
     # Load output

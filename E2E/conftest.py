@@ -1,7 +1,6 @@
 import glob
 import logging
 import os
-from pathlib import Path
 import re
 
 import pytest
@@ -25,7 +24,7 @@ def pytest_generate_tests(metafunc):
     # the html report) into one parametrized test per subfolder, so each folder's
     # pass/fail shows up as its own row.
     if "output_subfolder" in metafunc.fixturenames:
-        from Tests.conftest import ref_output_dir
+        from Tests.parameters import ref_output_dir
         subfolders = sorted(_discover_output_subfolders(ref_output_dir))
         metafunc.parametrize("output_subfolder", subfolders or [None])
 

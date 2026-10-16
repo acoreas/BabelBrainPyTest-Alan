@@ -1,0 +1,15 @@
+# Quick Sims
+BaseIsppa: 5.0 # W/cm2
+AllDC_PRF_Duration: #All combinations of timing that will be considered
+    -   DC: 0.8
+        PRF: 10.0
+        Duration: 5.0
+        DurationOff: 0.0
+    -   DC: 0.5
+        PRF: 100.0
+        Duration: 5.0
+        DurationOff: 0.0
+    -   DC: 0.2
+        PRF: 1000.0
+        Duration: 5.0
+        DurationOff: 0.0

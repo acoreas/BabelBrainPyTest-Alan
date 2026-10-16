@@ -1,16 +1,12 @@
 
 import base64
-import configparser
 import datetime
 import logging
 import os
 import platform
-import re
 import shutil
 import sys
 from io import BytesIO
-from pathlib import Path
-from pprint import pprint
 
 import h5py
 import matplotlib
@@ -23,147 +19,120 @@ import pytest_html
 import pyvista as pv
 import SimpleITK as sitk
 import trimesh
-import yaml
 import uuid
 from BabelViscoFDTD.H5pySimple import ReadFromH5py
 from nibabel import affines, nifti1, processing
 from PIL import Image
-from PySide6.QtCore import Qt
-from skimage.metrics import (
-    mean_squared_error,
-    normalized_root_mse,
-    structural_similarity,
-)
+from skimage.metrics import normalized_root_mse
 
 sys.path.append('./BabelBrain/')
 matplotlib.use('Agg')  # Use the 'Agg' backend, which is noninteractive
 np.random.seed(42) # RNG is same every time
-_IS_MAC = platform.system() == 'Darwin'
-
-def resource_path():  # needed for bundling
-    """Get absolute path to resource, works for dev and for PyInstaller"""
-    if not _IS_MAC:
-        return os.path.split(Path(__file__))[0]
-
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        bundle_dir = Path(sys._MEIPASS)
-    else:
-        bundle_dir = Path(__file__).parent
-
-    return bundle_dir
-
-from BabelBrain.BabelBrain import BabelBrain
-from BabelBrain.SelFiles.SelFiles import SelFiles
 from BabelBrain.FileManager import FileManager
 import BabelBrain.BabelBrain as bb_module # Needed to get monkeypatch working
 
 # ================================================================================================================================
-# FOLDER/FILE PATHS
+# PARAMETERS (defined in parameters.py)
 # ================================================================================================================================
-config = configparser.ConfigParser()
-config.read('Tests' + os.sep + 'config.ini')
-gpu_device = config['GPU']['device_name']               # GPU device used for test
+from Tests.parameters import (COMPUTING_BACKENDS, CT_TYPE_FILES, CT_TYPES,
+                              DATASETS, RELEASE_REAL_DATASET_SPATIAL_STEPS,
+                              SPATIAL_STEPS, SYNTHETIC_DATASET,
+                              SYNTHETIC_DATASET_DIR, TRAJECTORY_TYPES,
+                              TESTED_INDIVIDUAL_TARGETS, TRANSDUCERS,
+                              gen_output_dir, gpu_device,
+                              marker_selects_transducer, ref_output_dir,
+                              ref_output_dir_2, test_data_folder)
+
 print('Using GPU device: ',gpu_device)
-test_data_folder = config['Paths']['data_folder_path']  # Folder containing input test data
-ref_output_dir = config['Paths']['ref_output_folder_1']   # Folder containing previously generated BabelBrain outputs. Used in regression tests
-ref_output_dir_2 = config['Paths']['ref_output_folder_2']   # Folder containing previously generated BabelBrain outputs. Used in test_full_pipeline_two_outputs tests
-gen_output_dir = config['Paths']['gen_output_folder']   # Folder to store newly generated BabelBrain outputs. Used for generate_outputs "test"
-REPORTS_DIR = "PyTest_Reports"
 
 # ================================================================================================================================
-# PARAMETERS
+# HTML REPORT HELPERS
 # ================================================================================================================================
-test_trajectory_type = {
-    'brainsight': 0,
-    'slicer': 1
-}
-valid_trajectories = [
-    'Superficial_Target',
-    'Deep_Target',
-    'Skull_Target',
-]
-invalid_trajectories = [
-    'Outside_Target'
-]
-SimNIBS_type = {
-    'charm': 0
-}
-test_datasets = [
-    {'id': 'SDR_0p31','folder_path': test_data_folder + os.sep + 'SDR_0p31' + os.sep},
-    {'id': 'SDR_0p42','folder_path': test_data_folder + os.sep + 'SDR_0p42' + os.sep},
-    {'id': 'SDR_0p55','folder_path': test_data_folder + os.sep + 'SDR_0p55' + os.sep},    
-    {'id': 'SDR_0p67','folder_path': test_data_folder + os.sep + 'SDR_0p67' + os.sep},     
-    {'id': 'SDR_0p79','folder_path': test_data_folder + os.sep + 'SDR_0p79' + os.sep},
-    {'id': 'ID_0082' ,'folder_path': test_data_folder + os.sep + 'ID_0082'  + os.sep}
-]
-for ds in test_datasets:
-    ds['m2m_folder_path'] = ds['folder_path'] + f"m2m_{ds['id']}" + os.sep
-    ds['T1_path'] = ds['folder_path'] + "T1W.nii.gz"
-    ds['T1_iso_path'] = ds['folder_path'] + "T1W-isotropic.nii.gz"
+def synced_frames_viewer_html(panels,frame_label='Frame',interval_ms=120,width=320):
+    """Side-by-side image sequences played in lockstep: one slider and one Play/Pause button drive
+    every panel from the same frame index, so all panels start together and run at the same speed.
+    panels: list of (caption, [base64 webp frames]), all with the same number of frames and size.
 
-    if os.path.exists(ds['m2m_folder_path'] + 'charm_log.html'):
-        ds['simbNIBS_type'] = 'charm'
-    else:
-        ds['simbNIBS_type'] = 'headreco'
+    Every frame is decoded once up front and then drawn onto a <canvas> per panel. Swapping an
+    <img> src to a new data URL instead makes the browser decode each frame as it's shown, which
+    flickers when several large panels change every few hundred milliseconds.
 
-CT_types = {
-    'NONE': 0, # T1W Only
-    'CT': 1,
-    'ZTE': 2,
-    'PETRA': 3
-}
-coregistration = {
-    'no': 0,
-    'yes': 1
-}
-thermal_profiles = {
-    'thermal_profile_1': test_data_folder + os.sep + 'Profiles' + os.sep + 'Thermal_Profile_1.yaml',
-    'thermal_profile_2': test_data_folder + os.sep + 'Profiles' + os.sep + 'Thermal_Profile_2.yaml',
-    'thermal_profile_3': test_data_folder + os.sep + 'Profiles' + os.sep + 'Thermal_Profile_3.yaml'
-}
+    pytest-html inserts report extras through innerHTML, so <script> tags would never run;
+    everything is wired through inline on*="" attributes instead (as the h5 slice viewer does). The
+    frames ride in a data-* attribute and are parsed once, then cached on the container.
 
-#we build the Tx list using TRANSDUCER_LIST and Tx yaml files
-transducer_list_yaml = os.path.join(resource_path(),'..','BabelBrain','SelFiles','transducer_list.yaml')
-with open(transducer_list_yaml,'r') as ftxlist:
-    TRANSDUCER_LIST = yaml.load(ftxlist,yaml.SafeLoader)
+    pytest-html can insert the same extra more than once, so each handler works only on the
+    container it sits in (this.parentNode), never on document.getElementById: otherwise the timer of
+    an earlier copy keeps drawing its own frame index onto the live canvases, which shows as an
+    out-of-sequence frame every so often. A timer also stops once its container leaves the page."""
+    n_frames = len(panels[0][1])
+    assert all(len(frames) == n_frames for _, frames in panels), "all panels need the same number of frames"
+    frame_w, frame_h = Image.open(BytesIO(base64.b64decode(panels[0][1][0]))).size
+    wid = f"syncviewer_{uuid.uuid4().hex[:8]}"
+    frames_json = '[' + ','.join('[' + ','.join(f'"{b}"' for b in frames) + ']' for _, frames in panels) + ']'
 
-transducers=[]
-for n,tx in enumerate(TRANSDUCER_LIST):
-    name=tx['name']
-    selYaml=os.path.join(resource_path(),'..','BabelBrain','babel_transducers',tx['transducer_type'],tx['module_name'],'default.yaml')
-    assert(os.path.isfile(selYaml)), f"missing yaml for {name}: {selYaml}"
-    with open(selYaml,'r') as ftx:
-        TxConfig=yaml.load(ftx,yaml.SafeLoader)
-    if name =='Single':
-        freqs=[200000.0,300000.0,400000.0,500000.0,600000.0,700000.0,800000.0,900000.0,1000000.0]
-    else:
-        freqs=TxConfig['USFrequencies']
-    entry={}
-    entry['name']=name
-    entry['dropdown_index']=n
-    entry['diameter']=0
-    entry['freqs']=freqs
-    transducers.append(entry)
-
-pprint(transducers)
-
-computing_backends = [
-    # {'type': 'CPU','supported_os': ['Mac','Windows','Linux']},
-    {'type': 'OpenCL','supported_os': ['Windows','Linux']},
-    {'type': 'CUDA',  'supported_os': ['Windows','Linux']},
-    {'type': 'Metal', 'supported_os': ['Mac']},
-    {'type': 'MLX',   'supported_os': ['Mac']} # Linux too?
-]
-spatial_step = {
-    'Low_Res': 0.919,  # 200 kHz,   6 PPW
-    'Med_Res': 0.306,  # 600 kHz,   6 PPW
-    'High_Res': 0.184,  # 1000 kHz,  6 PPW
-    'Stress_Res': 0.092,  # 1000 kHz, 12 PPW
-}
+    # show(c,v) draws frame v of every panel of viewer c (only once all its frames are decoded)
+    show_js = (
+        "var c=this.parentNode;"
+        "function show(c,v){"
+        "if(!c._ready){return;}"
+        "var cvs=c.querySelectorAll('canvas');"
+        "for(var k=0;k<c._imgs.length;k++){cvs[k].getContext('2d').drawImage(c._imgs[k][v],0,0);}"
+        f"c.querySelector('[data-role=label]').textContent='{frame_label} '+(v+1)+'/'+c._imgs[0].length;}}"
+    )
+    slider_oninput = show_js + "show(c,parseInt(this.value,10));"
+    play_onclick = (
+        show_js +
+        "if(!c._ready){return;}"
+        "var slider=c.querySelector('[data-role=slider]');"
+        "if(c._timer){clearInterval(c._timer);c._timer=null;this.textContent='Play';return;}"
+        "this.textContent='Pause';"
+        "var timer=c._timer=setInterval(function(){"
+        "if(!c.isConnected){clearInterval(timer);return;}"  # this copy was replaced in the report
+        "var v=(parseInt(slider.value,10)+1)%c._imgs[0].length;"
+        "slider.value=v;show(c,v);"
+        f"}},{interval_ms});"
+    )
+    # Runs once per copy, when its hidden first frame has loaded: decode every frame, draw frame 0, autoplay
+    init_onload = (
+        show_js +
+        "if(c._started){return;}"
+        "c._started=true;"
+        "var frames=JSON.parse(c.dataset.frames);"
+        "var pending=[];"
+        "c._imgs=frames.map(function(panel){return panel.map(function(b){"
+        "var im=new Image();im.src='data:image/webp;base64,'+b;"
+        "pending.push(im.decode?im.decode():Promise.resolve());return im;});});"
+        "Promise.all(pending).then(function(){"
+        "c._ready=true;show(c,0);"
+        "c.querySelector('[data-role=play]').click();});"
+    )
+    cells = ''.join(
+        f"<td style='text-align:center;vertical-align:top'>"
+        f"<canvas width='{frame_w}' height='{frame_h}' style='width:{width}px;height:{width*frame_h//frame_w}px'></canvas>"
+        f"<div style='font-size:12px'>{caption}</div></td>"
+        for caption, _ in panels)
+    # img, slider, label and button must stay direct children of the container (handlers use this.parentNode)
+    return f"""
+<div id='{wid}' data-frames='{frames_json}' style='text-align:center;margin:4px 0 12px 0'>
+  <img src='data:image/webp;base64,{panels[0][1][0]}' style='display:none' onload="{init_onload}">
+  <table style='margin:auto'><tr>{cells}</tr></table>
+  <input type='range' data-role='slider' min='0' max='{n_frames-1}' value='0' style='width:{width*len(panels)}px'
+    oninput="{slider_oninput}"><br>
+  <span data-role='label'>Loading frames...</span>
+  <button type='button' data-role='play' style='margin-left:8px' onclick="{play_onclick}">Play</button>
+</div>
+"""
 
 # ================================================================================================================================
 # PYTEST FIXTURES
 # ================================================================================================================================
+@pytest.fixture(scope="session", autouse=True)
+def synthetic_dataset():
+    """Generate the synthetic GPU unit test dataset (instant, reused when unchanged)."""
+    from Tests.synthetic_dataset import ensure_synthetic_dataset
+    ensure_synthetic_dataset(str(SYNTHETIC_DATASET_DIR))
+
 @pytest.fixture()
 def mock_confirm_pseudoct(monkeypatch):
     monkeypatch.setattr(bb_module,"ConfirmPseudoCT", lambda *args, **kwargs: True)
@@ -291,7 +260,43 @@ def get_rmse():
     return _get_rmse
 
 @pytest.fixture()
-def get_resampled_input(load_files):
+def resample_grid():
+    def _resample_grid(nifti,spatial_step):
+        """Affine and shape of `nifti` resampled to isotropic `spatial_step` mm voxels."""
+        zooms = np.asarray(nifti.header.get_zooms())[:3]
+        new_zooms = np.full(3,spatial_step)
+        logging.info(f"Original zooms: {zooms}")
+        logging.info(f"New zooms: {new_zooms}")
+        new_shape = tuple(int(nifti.shape[i]/(new_zooms[i]/zooms[i])) for i in range(3))
+        new_affine = affines.rescale_affine(nifti.affine.copy(),nifti.shape[:3],new_zooms,new_shape)
+        return new_affine, new_shape
+
+    return _resample_grid
+
+@pytest.fixture()
+def cached_cpu_truth():
+    def _cached_cpu_truth(fname,compute,affine=None,dtype=np.float32):
+        """CPU reference output saved in `fname` (NIfTI or .npy), computed with compute() and
+        saved the first time so later runs skip the slow CPU calculation. NIfTI data is saved
+        as `dtype` (None keeps the computed dtype)."""
+        if os.path.exists(fname):
+            logging.info(f"Reloading CPU truth from {fname}")
+            return np.load(fname) if fname.endswith('.npy') else nibabel.load(fname).get_fdata()
+
+        logging.info('Generating CPU truth')
+        data = compute()
+        logging.info(f"Saving CPU truth to {fname} for future use")
+        if fname.endswith('.npy'):
+            np.save(fname,data)
+        else:
+            data_to_save = np.asarray(data) if dtype is None else np.asarray(data).astype(dtype)
+            nibabel.save(nibabel.Nifti1Image(data_to_save,affine),fname)
+        return data
+
+    return _cached_cpu_truth
+
+@pytest.fixture()
+def get_resampled_input(load_files,resample_grid):
     def _get_resampled_input(input,new_zoom,output_fname):
 
         if input.ndim > 3:
@@ -299,31 +304,18 @@ def get_resampled_input(load_files):
             tmp_affine = input.affine
             input = nifti1.Nifti1Image(tmp_data,tmp_affine)
 
-        # Determine new output dimensions and affine
-        zooms = np.asarray(input.header.get_zooms())
-        new_zooms = np.full(3,new_zoom)
-        logging.info(f"Original zooms: {zooms}")
-        logging.info(f"New zooms: {new_zooms}")
-        new_x_dim = int(input.shape[0]/(new_zooms[0]/zooms[0]))
-        new_y_dim = int(input.shape[1]/(new_zooms[1]/zooms[1]))
-        new_z_dim = int(input.shape[2]/(new_zooms[2]/zooms[2]))
-        new_affine = affines.rescale_affine(input.affine.copy(),
-                                                input.shape,
-                                                new_zooms,
-                                                (new_x_dim,new_y_dim,new_z_dim))
-
-        # Create output
-        output_data = np.zeros((new_x_dim,new_y_dim,new_z_dim),dtype=np.uint8)
+        # Create output with the new dimensions and affine
+        new_affine, new_shape = resample_grid(input,new_zoom)
+        output_data = np.zeros(new_shape,dtype=np.uint8)
         output_nifti = nifti1.Nifti1Image(output_data,new_affine)
         logging.info(f"New Dimensions: {output_data.shape}")
         logging.info(f"New Size: {output_data.size}")
 
-        try:
+        if os.path.exists(output_fname):
             logging.info('Reloading resampled input')
-            resampled_nifti = load_files([output_fname],skip_test=False)[0]
+            resampled_nifti = nibabel.load(output_fname)
             resampled_data = resampled_nifti.get_fdata()
-        except:
-            logging.info("File doesn't exist")
+        else:
             logging.info('Generating resampled input')
             resampled_nifti = processing.resample_from_to(input,output_nifti,mode='constant',order=0,cval=input.get_fdata().min()) # Truth method
             resampled_data = resampled_nifti.get_fdata()
@@ -488,7 +480,7 @@ def compare_data(get_rmse):
             cb1=plt.colorbar(im1,ax=axs[1],fraction=0.046)
             cb1.ax.yaxis.set_major_formatter(tick_formatter)
             cb1.set_label(unit)
-            im2=axs[2].imshow(diff_vol[frame_indices[0]],vmin=dvmin,vmax=dvmax)
+            im2=axs[2].imshow(diff_vol[frame_indices[0]],vmin=dvmin,vmax=dvmax,cmap=plt.cm.jet)
             axs[2].set_title(f'Diff{dlabel}')
             cb2=plt.colorbar(im2,ax=axs[2],fraction=0.046)
             cb2.ax.yaxis.set_major_formatter(tick_formatter)
@@ -719,7 +711,7 @@ def compare_data(get_rmse):
         refH5Simple2=ReadFromH5py(h5_test_path)
 
         with h5py.File(h5_ref_path, "r") as f1, h5py.File(h5_test_path, "r") as f2:
-            exact_match = f1.visititems(lambda name, obj: compare_items(name, obj1=obj))
+            f1.visititems(lambda name, obj: compare_items(name, obj1=obj))
 
         def _fmt(v, spec='.6g'):
             return format(v, spec) if v is not None else 'n/a'
@@ -768,30 +760,6 @@ def compare_data(get_rmse):
 
         return len(mismatches) == 0
     
-    def mse(output_array,truth_array):
-        logging.info('Calculating mean square error')
-
-        if output_array.size != truth_array.size:
-            pytest.fail(f"Array sizes don't match: {output_array.size} vs {truth_array.size}")
-
-        if output_array.size == 0:
-            pytest.fail("Arrays are empty")
-        
-        mean_square_error = mean_squared_error(output_array, truth_array)
-        return mean_square_error
-    
-    def ssim(output_array,truth_array,win_size=7,data_range=None):
-        logging.info('Calculating structural similarity')
-
-        if output_array.size != truth_array.size:
-            pytest.fail(f"Array sizes don't match: {output_array.size} vs {truth_array.size}")
-
-        if output_array.size == 0:
-            pytest.fail("Arrays are empty")
-
-        score = structural_similarity(output_array, truth_array, win_size=win_size,data_range=data_range)
-        return score
-    
     def stl_area(output_stl,truth_stl):
         logging.info('Calculating percent error of stl area')
         
@@ -805,7 +773,7 @@ def compare_data(get_rmse):
         return percent_error_area
 
     # Return the fixture object with the specified attribute
-    return {'array_data': array_data,'bhatt_coeff': bhattacharyya_coefficient,'dice_coefficient': dice_coefficient,'h5_data': h5_data,'mse': mse,'ssim': ssim,'stl_area': stl_area}
+    return {'array_data': array_data,'bhatt_coeff': bhattacharyya_coefficient,'dice_coefficient': dice_coefficient,'h5_data': h5_data,'stl_area': stl_area}
 
 @pytest.fixture()
 def extract_nib_info():
@@ -856,141 +824,147 @@ def image_to_base64():
 
 @pytest.fixture()
 def get_mpl_plot():
-    def _get_mpl_plot(datas,axes_num=1,titles=None, color_map='viridis'):
-
+    def _get_mpl_plot(datas,axes_num=1,titles=None,color_map='viridis',colorbars=False,max_projection=None,zero_based=None):
+        """Mid slices of each volume along the first `axes_num` axes (one row per axis).
+        color_map may be one map or one per volume; max_projection (one bool per volume) shows the
+        maximum through the volume instead of the mid slice; zero_based (one bool per volume) starts
+        that volume's colour scale at 0 (e.g. absolute differences, so no difference is the lowest colour)."""
         data_num = len(datas)
-        fig, axs = plt.subplots(axes_num, data_num, figsize = (data_num * 2.5, axes_num * 2.5))
+        color_maps = color_map if isinstance(color_map,(list,tuple)) else [color_map]*data_num
+        max_projection = max_projection or [False]*data_num
+        zero_based = zero_based or [False]*data_num
+        fig, axs = plt.subplots(axes_num, data_num, figsize=(data_num * 2.5, axes_num * 2.5), squeeze=False)
 
         for axis in range(axes_num):
             for num in range(data_num):
-                midpoint = datas[num].shape[axis]//2
+                data = np.asarray(datas[num], dtype=np.float64)
+                if max_projection[num]:
+                    image = np.max(data, axis=axis)
+                else:
+                    image = np.take(data, data.shape[axis]//2, axis=axis)
+                if axis < 2:
+                    image = np.rot90(image)
+                vmin, vmax = (0, max(float(image.max()), 1e-12)) if zero_based[num] else (None, None)
+                im = axs[axis,num].imshow(image, cmap=color_maps[num], vmin=vmin, vmax=vmax)
+                if colorbars:
+                    plt.colorbar(im, ax=axs[axis,num], fraction=0.046)
+                if titles is not None and axis == 0:
+                    axs[axis,num].set_title(titles[num], fontsize=10)
 
-                try:
-                    if axis == 0:
-                        axs[axis,num].imshow(np.rot90(datas[num][midpoint,:,:]), cmap=color_map)
-                    elif axis == 1:
-                        axs[axis,num].imshow(np.rot90(datas[num][:,midpoint,:]), cmap=color_map)
-                    else:
-                        axs[axis,num].imshow(datas[num][:,:,midpoint], cmap=color_map)
-
-                    if titles is not None and axis == 0:
-                        axs[axis,num].set_title(titles[num])
-                except:
-                    if axis == 0:
-                        axs[num].imshow(np.rot90(datas[num][midpoint,:,:]), cmap=color_map)
-                    elif axis == 1:
-                        axs[num].imshow(np.rot90(datas[num][:,midpoint,:]), cmap=color_map)
-                    else:
-                        axs[num].imshow(datas[num][:,:,midpoint], cmap=color_map)
-
-                    if titles is not None and axis == 0:
-                        axs[num].set_title(titles[num],fontsize=14)
-
-        # Adjust plots
-        plt.subplots_adjust(left=0.1, right=0.9, bottom=0.1, top=0.9, wspace=0.5, hspace=0.5)
         plt.tight_layout()
 
         # Save the plot to a BytesIO object
         buffer = BytesIO()
         plt.savefig(buffer, format='webp')
+        plt.close(fig)
         buffer.seek(0)
-        
+
         # Encode the image data as base64 string
-        base64_plot = base64.b64encode(buffer.getvalue()).decode('utf-8')
-        
-        return base64_plot
-    
+        return base64.b64encode(buffer.getvalue()).decode('utf-8')
+
     return _get_mpl_plot
+
+@pytest.fixture()
+def gpu_vs_cpu_plot(get_mpl_plot):
+    def _gpu_vs_cpu_plot(plots,titles,cpu_output,gpu_output,color_map='gray'):
+        """`plots` (inputs, CPU and GPU outputs) plus a |GPU - CPU| panel. The difference panel is a
+        maximum projection so differences anywhere in the volume are visible."""
+        diff = np.abs(np.asarray(gpu_output,dtype=np.float64) - np.asarray(cpu_output,dtype=np.float64))
+        n_diff = int(np.count_nonzero(diff))
+        return get_mpl_plot(list(plots) + [diff],
+                            axes_num=3,
+                            titles=list(titles) + [f"|GPU - CPU| (max)\n{n_diff} voxels differ"],
+                            color_map=[color_map]*len(plots) + [plt.cm.jet],
+                            colorbars=True,
+                            max_projection=[False]*len(plots) + [True],
+                            zero_based=[False]*len(plots) + [True])
+
+    return _gpu_vs_cpu_plot
 
 @pytest.fixture
 def get_pyvista_plot():
+    """3D plots of meshes and voxels for the html report. Every plot returns a base64 WebP of a single
+    view, or with video=True a list of orbit frames to play with synced_frames_viewer_html."""
 
-    def intersection_plot(mesh1,mesh2,mesh3):
-        # Create pyvista plot
-        plotter = pv.Plotter(window_size=(400, 400),off_screen=True)
+    def _plotter(size=500):
+        plotter = pv.Plotter(window_size=(size, size),off_screen=True)
         plotter.background_color = 'white'
+        return plotter
+
+    def _orbit_frames(plotter,reference_mesh,n_frames):
+        """Frames (base64 WebP) of the camera making a full turn around the scene while sweeping from
+        60 degrees above to 60 degrees below it. The camera is fitted to reference_mesh rather than to
+        the scene, so plots sharing that mesh are framed identically and their frames line up."""
+        plotter.show(auto_close=False)
+        bounds = np.asarray(pv.wrap(reference_mesh).bounds).reshape(3, 2)
+        focal = bounds.mean(axis=1)
+        radius = np.linalg.norm(bounds[:, 1] - bounds[:, 0]) / 2
+        distance = 1.1 * radius / np.tan(np.radians(plotter.camera.view_angle) / 2)
+        frames = []
+        for i in range(n_frames):
+            azimuth = 2*np.pi*i/n_frames
+            elevation = np.radians(60)*np.sin(azimuth)
+            direction = np.array([np.cos(elevation)*np.cos(azimuth), np.cos(elevation)*np.sin(azimuth), np.sin(elevation)])
+            plotter.camera.position = focal + distance*direction
+            plotter.camera.focal_point = focal
+            plotter.camera.up = (0, 0, 1)
+            plotter.render()
+            buffer = BytesIO()
+            Image.fromarray(plotter.screenshot(return_img=True)).save(buffer,format='WEBP',quality=70)
+            frames.append(base64.b64encode(buffer.getvalue()).decode('utf-8'))
+        plotter.close()
+        return frames
+
+    def _render(plotter,reference_mesh,video=False,n_frames=48):
+        """base64 WebP of a single view, or with video=True the list of orbit frames (show them
+        with synced_frames_viewer_html)."""
+        if video:
+            return _orbit_frames(plotter,reference_mesh,n_frames)
+        buffer = BytesIO()
+        plotter.show(screenshot=buffer)
+        return base64.b64encode(buffer.getvalue()).decode('utf-8')
+
+    def _add_points(plotter,points,max_points,**kwargs):
+        step = max(1, len(points)//max_points) # Plot at most ~max_points points
+        plotter.add_mesh(pv.PolyData(np.asarray(points[::step],dtype=np.float64)),**kwargs)
+
+    def intersection_plot(mesh1,mesh2,mesh3,video=False):
+        plotter = _plotter(400)
         plotter.add_mesh(mesh1, opacity=0.2)
         plotter.add_mesh(mesh2, opacity=0.2)
         plotter.add_mesh(mesh3, opacity=0.5, color='red')
+        return _render(plotter,mesh1,video)
 
-        # Save the plot to a BytesIO object
-        buffer = BytesIO()
-        plotter.show(screenshot=buffer)
-        
-        # Encode the image data as base64 string
-        base64_plot = base64.b64encode(buffer.getvalue()).decode('utf-8')
-        
-        return base64_plot
-    
-    def mesh_plot(meshes,title=''):
-
-        # Create pyvista plot
-        plotter = pv.Plotter(window_size=(500, 500),off_screen=True)
-        plotter.background_color = 'white'
+    def mesh_plot(meshes,title='',video=False):
+        plotter = _plotter()
         for mesh in meshes:
-            plotter.add_mesh(pv.wrap(mesh),opacity=0.5)
+            plotter.add_mesh(pv.wrap(mesh),opacity=0.5,show_scalar_bar=False)
         plotter.add_title(title, font_size=12)
-        
-        # Save the plot to a BytesIO object
-        buffer = BytesIO()
-        plotter.show(screenshot=buffer)
+        return _render(plotter,meshes[0],video)
 
-        # Encode the image data as base64 string
-        base64_plot = base64.b64encode(buffer.getvalue()).decode('utf-8')
-
-        return base64_plot
-    
-    def voxel_plot(mesh,Points,title=''):
-        # Create points mesh
-        step = Points.shape[0]//1000000 # Plot 1000000 points
-        points_mesh =  pv.PolyData(Points[::step,:])
-
-        # Create pyvista plot
-        plotter = pv.Plotter(window_size=(500, 500),off_screen=True)
-        plotter.background_color = 'white'
-        plotter.add_mesh(pv.wrap(mesh),opacity=0.5)
-        plotter.add_mesh(points_mesh,color='blue',opacity=0.1)
+    def voxel_plot(mesh,Points,title='',video=False):
+        plotter = _plotter()
+        plotter.add_mesh(pv.wrap(mesh),opacity=0.5,show_scalar_bar=False)
+        _add_points(plotter,Points,1000000,color='blue',opacity=0.1)
         plotter.add_title(title,font_size=12)
-        
-        # Save the plot to a BytesIO object
-        buffer = BytesIO()
-        plotter.show(screenshot=buffer)
+        return _render(plotter,mesh,video)
 
-        # Encode the image data as base64 string
-        base64_plot = base64.b64encode(buffer.getvalue()).decode('utf-8')
+    def difference_plot(mesh,only_gpu_points,only_cpu_points,title='',video=False):
+        """Skin mesh with the voxels found by only one of the GPU (red) and CPU (blue) calculations."""
+        plotter = _plotter()
+        plotter.add_mesh(pv.wrap(mesh),opacity=0.2,color='lightgray',show_scalar_bar=False)
+        for points, color, label in ((only_gpu_points,'red','GPU only'),(only_cpu_points,'blue','CPU only')):
+            if len(points):
+                _add_points(plotter,points,200000,color=color,point_size=4,label=f"{label} ({len(points)})")
+        if len(only_gpu_points) or len(only_cpu_points):
+            plotter.add_legend(loc='lower left',size=(0.4,0.1),bcolor='white')
+        plotter.add_title(title,font_size=10)
+        return _render(plotter,mesh,video)
 
-        return base64_plot
-    
     # Return the fixture object with the specified attribute
-    return {'intersection_plot': intersection_plot,'mesh_plot': mesh_plot,'voxel_plot': voxel_plot}
+    return {'intersection_plot': intersection_plot,'mesh_plot': mesh_plot,'voxel_plot': voxel_plot,
+            'difference_plot': difference_plot}
 
-@pytest.fixture()
-def get_freq():
-    def _get_default_freq(tx):
-        tx = tx['name']
-        if tx == 'Single':
-            freq = '400'
-        elif tx in ['CTX_500','DPX_500','H246','R15148','IGT64_500']:
-            freq = '500'
-        elif tx in ['CTX_250','CTX_250_2ch']:
-            freq = '250'
-        elif tx == 'H317':
-            freq = '250'
-        elif tx in ['BSonix','I12378','R15646']:
-            freq = '650'
-        elif tx in ['ATAC']:
-            freq = '1000'
-        elif tx in ['REMOPD','R15287','DPXPC_300','R15473']:
-            freq = '300'
-        return freq
-    
-    def _get_low_freq(tx):
-        return tx['freqs'][0]
-        
-    def _get_high_freq(tx):
-        return tx['freqs'][-1]
-
-    return {'default': _get_default_freq,'low': _get_low_freq,'high': _get_high_freq}
 
 @pytest.fixture()
 def get_extra_scan_file():
@@ -998,7 +972,7 @@ def get_extra_scan_file():
         scan_file_path = ""
 
         if extra_scan_type != 'NONE':
-            scan_file_path = ds_folder_path + os.sep + extra_scan_type + '.nii.gz'
+            scan_file_path = ds_folder_path + os.sep + CT_TYPE_FILES[extra_scan_type]
 
             if not os.path.exists(scan_file_path):
                 pytest.skip(f"{ds_folder_path} does not possess a {extra_scan_type} file")
@@ -1008,139 +982,87 @@ def get_extra_scan_file():
     return _get_extra_scan_file
 
 @pytest.fixture()
-def selfiles_widget(qtbot):
-
-    sf_widget = SelFiles()
-    sf_widget.show()
-    qtbot.addWidget(sf_widget) # qtbot will handle sf_widget teardown
-
-    yield sf_widget
-    
-    sf_widget.close()
-    sf_widget.deleteLater()
-
-@pytest.fixture()
-def babelbrain_widget(request,qtbot,
+def babelbrain_widget(qtbot,
+                      monkeypatch,
                       trajectory_type,
                       scan_type,
                       trajectory,
                       dataset,
                       transducer,
-                      selfiles_widget,
                       frequency,
-                      get_extra_scan_file,
                       computing_backend,
-                      load_files,
                       tmp_path):
-    created_widgets = []
-    
+    """Factory returning a BabelBrain widget set up for this test's parameters, writing its
+    outputs to tmp_path (or gen_output_folder when generate_outputs=True)."""
+    import Tests.pipeline_helpers as rh
+
     def _babelbrain_widget(generate_outputs=False):
-        
-        # Convert frequency to string
-        freq = str(int(frequency/1000)
-                   )
-        # Folder paths
-        input_folder = dataset['folder_path']
-        simNIBS_folder = dataset['m2m_folder_path']
-        trajectory_folder = input_folder + 'Trajectories' + os.sep
-        if generate_outputs:
-            os.makedirs(gen_output_dir,exist_ok = True)
-            output_folder = gen_output_dir + f"{os.sep}{dataset['id']}_{trajectory_type}_CT-{scan_type}_{trajectory}_{transducer['name']}_Freq-{freq}kHz_{computing_backend['type']}{os.sep}"
-        else:
-            output_folder = str(tmp_path) + f"{os.sep}{dataset['id']}_{trajectory_type}_CT-{scan_type}_{trajectory}_{transducer['name']}_Freq-{freq}kHz_{computing_backend['type']}{os.sep}"
-
-        os.makedirs(output_folder,exist_ok = True)
-        # Filenames
-        T1W_file = dataset['T1_path']
-        if scan_type != 'NONE':
-            CT_file = get_extra_scan_file(scan_type,input_folder)
-        thermal_profile_file = thermal_profiles['thermal_profile_1']
-        trajectory_file = trajectory_folder + f"{trajectory_type}_{dataset['id']}_{trajectory}.txt"
-        load_files([trajectory_file]) # Use to ensure trajectory file exists otherwise skip
-
-        # Set SelFiles Parameters
-        selfiles_widget.ui.TrajectoryTypecomboBox.setCurrentIndex(test_trajectory_type[trajectory_type])
-        selfiles_widget.ui.TrajectorylineEdit.setText(trajectory_file)
-        selfiles_widget.ui.SimbNIBSTypecomboBox.setCurrentIndex(SimNIBS_type['charm'])
-        selfiles_widget.ui.SimbNIBSlineEdit.setText(simNIBS_folder)
-        selfiles_widget.ui.T1WlineEdit.setText(T1W_file)
-        selfiles_widget.ui.CTTypecomboBox.setCurrentIndex(CT_types[scan_type])
-        if scan_type != 'NONE':
-            selfiles_widget.ui.CoregCTcomboBox.setCurrentIndex(coregistration['yes'])
-            selfiles_widget.ui.CTlineEdit.setText(CT_file)
-        selfiles_widget.ui.ThermalProfilelineEdit.setText(thermal_profile_file)
-        selfiles_widget.ui.TransducerTypecomboBox.setCurrentIndex(transducer['dropdown_index'])
-        cb_index = selfiles_widget.ui.ComputingEnginecomboBox.findText(computing_backend['type'],Qt.MatchContains)
-        selfiles_widget.ui.ComputingEnginecomboBox.setCurrentIndex(cb_index)
-        if selfiles_widget.ui.MultiPointTypecomboBox.isEnabled():
-            selfiles_widget.ui.MultiPointTypecomboBox.setCurrentIndex(0) # Only single focus
-            # selfiles_widget.ui.MultiPointlineEdit.setText() # Fill out when implementing test for multi-point sims
-        selfiles_widget.ui.ContinuepushButton.click()
-
-        # Create BabelBrain widget
-        os.environ['BABEL_PYTEST']='1'
-        bb_widget = BabelBrain(selfiles_widget,AltOutputFilesPath=str(output_folder))
-        bb_widget.show()
-        qtbot.addWidget(bb_widget) # qtbot will handle bb_widget teardown
-        created_widgets.append(bb_widget)
-
-        # Copy T1W file and additional scan over to output folder
-        # Not needed?
-        shutil.copy(bb_widget.Config['T1W'],os.path.join(output_folder,os.path.basename(bb_widget.Config['T1W'])))
-        if scan_type != 'NONE':
-            shutil.copy(CT_file,os.path.join(output_folder,os.path.basename(CT_file)))
-
-        # Copy SimbNIBs input file over to output folder
-        if bb_widget.Config['SimbNIBSType'] == 'charm':
-            SimbNIBSInput = bb_widget.Config['simbnibs_path'] + 'final_tissues.nii.gz'
-        else:
-            SimbNIBSInput = bb_widget.Config['simbnibs_path'] + 'skin.nii.gz'
-        os.makedirs(os.path.join(output_folder,os.path.basename(os.path.dirname(bb_widget.Config['simbnibs_path']))),exist_ok=True)
-        shutil.copy(SimbNIBSInput,os.path.join(output_folder,re.search('m2m.*',SimbNIBSInput)[0]))
-
-        # Copy Trajectory file over to output folder
-        trajectory_new_file = os.path.join(output_folder,os.path.basename(bb_widget.Config['Mat4Trajectory']))
-        shutil.copy(bb_widget.Config['Mat4Trajectory'],trajectory_new_file)
-        # Affects trajectory naming in output files. BabelBrain normalises Config['ID'] itself
-        # when it reads the trajectory, and the shape differs between versions: a plain string
-        # up to v0.8.x, a list (one entry per trajectory/transducer) from the dual-Tx refactor on.
-        # Preserve whatever shape the app produced - assigning a bare string to a list-based
-        # version makes it iterate over the characters of the name and rerun Step 1 once per letter.
-        new_ID = os.path.splitext(os.path.basename(bb_widget.Config['Mat4Trajectory']))[0]
-        if isinstance(bb_widget.Config['ID'], str):
-            bb_widget.Config['ID'] = new_ID
-        else:
-            n_traj = len(bb_widget.Config['ID'])
-            bb_widget.Config['ID'] = [new_ID] if n_traj == 1 else [f"{new_ID}_{i}" for i in range(n_traj)]
-
-        # Edit file paths so new data is saved in output folder
-        bb_widget.Config['Mat4Trajectory'] = trajectory_new_file
-        bb_widget.Config['T1WIso'] = os.path.join(output_folder,os.path.basename(bb_widget.Config['T1WIso']))
-        bb_widget.Config['simbnibs_path'] = os.path.join(output_folder,os.path.split(os.path.split(bb_widget.Config['simbnibs_path'])[0])[1])
-        if bb_widget.Config['bUseCT']:
-            bb_widget.Config['CT_or_ZTE_input'] = os.path.join(output_folder,os.path.basename(bb_widget.Config['CT_or_ZTE_input']))
-
-        # Set Sim Parameters
-        freq_index = bb_widget.Widget.USMaskkHzDropDown.findText(freq)
-
-        bb_widget.Widget.USMaskkHzDropDown.setCurrentIndex(freq_index)
-        bb_widget.Widget.USPPWSpinBox.setProperty('UserData',6) # 6 PPW
-        if scan_type != 'NONE':
-            bb_widget.Widget.HUThresholdSpinBox.setValue(300)
-        
-        return bb_widget
+        case = rh.PipelineCase(dataset=dataset['id'],
+                               transducer=transducer['name'],
+                               freq_khz=int(frequency/1000),
+                               backend=computing_backend['type'],
+                               target=trajectory,
+                               trajectory_type=trajectory_type,
+                               ct_type=scan_type)
+        output_folder = os.path.join(gen_output_dir if generate_outputs else str(tmp_path), case.case_id)
+        rh.auto_answer_dialogs(monkeypatch)
+        return rh.build_babelbrain(qtbot, case, output_folder)
 
     yield _babelbrain_widget
 
-    for w in created_widgets:
-        w.close()
-        w.deleteLater()
-    
     if tmp_path.exists():
         shutil.rmtree(tmp_path) # Remove all files created in tmp folder
-    
-    if 'BABEL_PYTEST' in os.environ:
-        os.environ.pop('BABEL_PYTEST')
+
+@pytest.fixture()
+def pipeline(qtbot, monkeypatch, request, compare_data, image_to_base64, tmp_path):
+    """Runs and compares BabelBrain pipelines (see pipeline_helpers.py).
+    Screenshots and comparison tables go to this test's html report entry."""
+    import Tests.pipeline_helpers as rh
+
+    request.node.screenshots = []
+    screenshots = request.node.screenshots
+
+    class _Pipeline:
+        work_dir = tmp_path
+
+        @staticmethod
+        def auto_answer_dialogs():
+            rh.auto_answer_dialogs(monkeypatch)
+
+        @staticmethod
+        def ensure_outputs(suite, case, custom_tx_name=None):
+            """Folder of saved outputs for `case`, running the pipeline only if needed."""
+            return rh.ensure_case_outputs(qtbot, monkeypatch, suite, case, screenshots, image_to_base64,
+                                          custom_tx_name=custom_tx_name)
+
+        @staticmethod
+        def run_widget(bb, last_step=3, export_maps=True):
+            """Run steps 1..last_step (and exports) on an already set up BabelBrain widget."""
+            try:
+                rh.run_pipeline(qtbot, bb, last_step=last_step, screenshots=screenshots,
+                                image_to_base64=image_to_base64, export_maps=export_maps)
+            except rh.PipelineError as error:
+                pytest.fail(str(error))
+
+        @staticmethod
+        def run(case, output_dir, remote_server_name=None):
+            """Run `case` into output_dir, without saving it for reuse. Returns the BabelBrain widget."""
+            rh.auto_answer_dialogs(monkeypatch)
+            bb = rh.build_babelbrain(qtbot, case, output_dir, remote_server_name=remote_server_name)
+            _Pipeline.run_widget(bb, last_step=case.last_step)
+            return bb
+
+        @staticmethod
+        def assert_thermal_outputs_match(ref_dir, test_dir, tolerance, message="Outputs differ from reference"):
+            match, problems = rh.compare_thermal_outputs(ref_dir, test_dir, tolerance, screenshots, compare_data)
+            assert match, f"{message}:\n" + "\n".join(problems or ["see h5 tables in report"])
+
+        @staticmethod
+        def assert_all_outputs_match(ref_dir, test_dir, tolerance, message="Outputs differ from reference"):
+            match, problems = rh.compare_all_outputs(ref_dir, test_dir, tolerance, screenshots, compare_data)
+            assert match, f"{message}:\n" + "\n".join(problems)
+
+    return _Pipeline
 
 @pytest.fixture()
 def set_up_file_manager(load_files,tmpdir,get_example_data,get_extra_scan_file):
@@ -1157,7 +1079,7 @@ def set_up_file_manager(load_files,tmpdir,get_example_data,get_extra_scan_file):
                                    T1_iso_path,
                                    extra_scan_path,
                                    prefix,
-                                   CT_types[extra_scan_type],
+                                   CT_TYPES[extra_scan_type],
                                    current_HUT=HUT,
                                    current_pCT_range=pCT_range)
         
@@ -1178,7 +1100,7 @@ def set_up_file_manager(load_files,tmpdir,get_example_data,get_extra_scan_file):
                                    T1_iso_fname="",
                                    extra_scan_fname="",
                                    prefix="",
-                                   current_CT_type=CT_types[CT_type],
+                                   current_CT_type=CT_TYPES[CT_type],
                                    current_HUT=HUT,
                                    current_pCT_range=pCT_range)
         
@@ -1213,154 +1135,114 @@ def get_example_data():
         
         return nibabel_nifti
     
-    def nifti_sitk_data():
-        data = np.random.rand(256,256,128)
-        nibabel_sitk = sitk.GetImageFromArray(data)
-
-        # Set the spacing, direction, and origin in the SimpleITK image
-        nibabel_sitk.SetSpacing(np.random.rand(3))
-        nibabel_sitk.SetDirection(np.random.rand(3,3))
-        nibabel_sitk.SetOrigin(np.random.rand(3))
-        
-        return nibabel_sitk
-    
     # Return the fixture object with the specified attribute
     return {'numpy': numpy_data,
-            'nifti_nib':nifti_nib_data,
-            'nifti_sitk':nifti_sitk_data}
+            'nifti_nib':nifti_nib_data}
         
 # ================================================================================================================================
 # PYTEST HOOKS
 # ================================================================================================================================
+def _explicitly_parametrized(metafunc, name):
+    """True when the test parametrizes `name` itself (@pytest.mark.parametrize), so the default
+    parametrization below doesn't apply."""
+    for marker in metafunc.definition.iter_markers('parametrize'):
+        argnames = marker.args[0]
+        if isinstance(argnames, str):
+            argnames = [n.strip() for n in argnames.split(',')]
+        if name in argnames:
+            return True
+    return False
+
+
 def pytest_generate_tests(metafunc):
-    # Parametrize + mark tests based on fixtures used
-    if 'trajectory_type' in metafunc.fixturenames:
-        metafunc.parametrize('trajectory_type', tuple(test_trajectory_type)) 
+    """Default parametrization for tests that request these fixtures. A test narrows any of them by
+    parametrizing it explicitly, e.g. @pytest.mark.parametrize('trajectory', INVALID_TARGETS)."""
+    def wants(name):
+        return name in metafunc.fixturenames and not _explicitly_parametrized(metafunc, name)
 
-    if 'scan_type' in metafunc.fixturenames:
-        metafunc.parametrize('scan_type',tuple(CT_types.keys()))
+    if wants('trajectory_type'):
+        metafunc.parametrize('trajectory_type', list(TRAJECTORY_TYPES))
 
-    if 'second_scan_type' in metafunc.fixturenames:
-        metafunc.parametrize('second_scan_type',tuple(CT_types.keys()))
+    for name in ('scan_type', 'second_scan_type'):
+        if wants(name):
+            metafunc.parametrize(name, list(CT_TYPES))
 
-    if 'trajectory' in metafunc.fixturenames and 'invalid' in metafunc.function.__name__:
-        metafunc.parametrize('trajectory', tuple(invalid_trajectories))
-    elif 'trajectory' in metafunc.fixturenames and ('valid' in metafunc.function.__name__ or
-                                                    'normal' in metafunc.function.__name__):
-        metafunc.parametrize('trajectory', tuple(valid_trajectories)) 
-    
-    if 'dataset' in metafunc.fixturenames:
-        metafunc.parametrize('dataset',tuple(test_datasets),ids=tuple(ds['id'] for ds in test_datasets))
-    
-    if 'transducer' in metafunc.fixturenames:
+    if wants('trajectory'):
+        metafunc.parametrize('trajectory', TESTED_INDIVIDUAL_TARGETS)
+
+    res_marks = {'Low_Res': [pytest.mark.low_res],
+                 'Med_Res': [pytest.mark.medium_res],
+                 'High_Res': [pytest.mark.slow, pytest.mark.high_res],
+                 'Stress_Res': [pytest.mark.slow, pytest.mark.stress_res]}
+
+    dataset_with_spatial_step = wants('dataset') and wants('spatial_step')
+    if dataset_with_spatial_step:
+        # GPU unit tests: every spatial step on the small synthetic head and the real datasets. Real
+        # dataset resolutions that release testing skips (they take very long) are marked release_exclude
+        params = [pytest.param(SYNTHETIC_DATASET, value, id=f"synthetic-{key}", marks=res_marks.get(key, []))
+                  for key, value in SPATIAL_STEPS.items()]
+        for ds_id, ds in DATASETS.items():
+            for key, value in SPATIAL_STEPS.items():
+                marks = list(res_marks.get(key, []))
+                if key not in RELEASE_REAL_DATASET_SPATIAL_STEPS:
+                    marks.append(pytest.mark.release_exclude)
+                params.append(pytest.param(ds, value, id=f"{ds_id}-{key}", marks=marks))
+        metafunc.parametrize('dataset,spatial_step', params)
+    elif wants('dataset'):
+        metafunc.parametrize('dataset', list(DATASETS.values()), ids=list(DATASETS))
+
+    if wants('transducer'):
         if 'frequency' in metafunc.fixturenames:
             # Parametrize both transducer and freq
-            params = []
-            for tx in transducers:
-                for freq in tx['freqs']:
-                    params.append(pytest.param(tx, freq, id=f"{tx['name']}-{int(freq/1000)}kHz"))
+            params = [pytest.param(tx, freq, id=f"{tx['name']}-{int(freq/1000)}kHz")
+                      for tx in TRANSDUCERS for freq in tx['freqs']]
             metafunc.parametrize("transducer,frequency", params)
         else:
-            # Only parametrize transducer
-            metafunc.parametrize(
-                "transducer",
-                [pytest.param(tx, id=tx['name']) for tx in transducers]
-            )
-    
-    if 'computing_backend' in metafunc.fixturenames:
-        params = [pytest.param(cb, id=cb['type'], marks=pytest.mark.gpu) for cb in computing_backends]
+            metafunc.parametrize("transducer", [pytest.param(tx, id=tx['name']) for tx in TRANSDUCERS])
+
+    if wants('computing_backend'):
+        params = [pytest.param(cb, id=cb['type'], marks=pytest.mark.gpu) for cb in COMPUTING_BACKENDS]
         metafunc.parametrize("computing_backend", params)
 
-    if 'spatial_step' in metafunc.fixturenames:
-        # metafunc.parametrize('spatial_step',tuple(spatial_step.values()),ids=tuple(spatial_step.keys()))
-        params = []
-        for ss_key,ss_value in spatial_step.items():
-            if "low" in ss_key.lower():
-                params.append(pytest.param(ss_value, id=ss_key, marks=pytest.mark.low_res))
-            elif "med" in ss_key.lower():
-                params.append(pytest.param(ss_value, id=ss_key, marks=pytest.mark.medium_res))
-            elif "high" in ss_key.lower():
-                params.append(pytest.param(ss_value, id=ss_key, marks=[pytest.mark.slow,pytest.mark.high_res]))
-            elif "stress" in ss_key.lower():
-                params.append(pytest.param(ss_value, id=ss_key, marks=[pytest.mark.slow,pytest.mark.stress_res]))
-            else:
-                params.append(pytest.param(ss_value, id=ss_key))
-        metafunc.parametrize('spatial_step',params)
-        
-    if 'tolerance' in metafunc.fixturenames:
+    if wants('spatial_step') and not dataset_with_spatial_step:
+        metafunc.parametrize('spatial_step', [pytest.param(value, id=key, marks=res_marks.get(key, []))
+                                              for key, value in SPATIAL_STEPS.items()])
+
+    if wants('tolerance'):
         metafunc.parametrize('tolerance',
                              [pytest.param(0, marks=pytest.mark.tol_0, id="0%_tolerance"),
                               pytest.param(0.01, marks=pytest.mark.tol_1, id="1%_tolerance"),
                               pytest.param(0.05, marks=pytest.mark.tol_5, id="5%_tolerance")])
 
+
 def pytest_collection_modifyitems(config, items):
+    """Add the *_babelbrain_params selection markers based on each test's parameter values
+    (transducer/frequency choices are in parameters.MARKER_TRANSDUCERS)."""
     for item in items:
-        # Add markers for basic babelbrain param tests
-        if "Deep_Target" in item.name and \
-            "ID_0082" in item.name and (\
-            ("H317" in item.name and ("250kHz" in item.name or "825kHz" in item.name)) or \
-            ("Single" in item.name and "500kHz" in item.name) or \
-            ("CTX_500" in item.name and "500kHz" in item.name) or \
-            "CTX_250" in item.name or \
-            "DPX_500" in item.name or \
-            "ATAC" in item.name or \
-            "DPXPC_300" in item.name or \
-            "H246" in item.name or \
-            "BSonix" in item.name or \
-            ("REMOPD" in item.name and "490kHz" in item.name) or \
-            "I12378" in item.name or \
-            "R15148" in item.name or \
-            "R15287" in item.name or \
-            "R15473" in item.name or \
-            "R15646" in item.name or \
-            "IGT64_500" in item.name) and \
-            "PETRA" not in item.name and \
-            "brainsight" in item.name and \
-            ("NONE" in item.name or "CT" in item.name or "ZTE" in item.name):
-            item.add_marker(pytest.mark.basic_babelbrain_params)
+        params = getattr(getattr(item, 'callspec', None), 'params', {})
+        if not {'transducer', 'frequency', 'dataset', 'trajectory', 'trajectory_type', 'scan_type'} <= params.keys():
+            continue
+        tx, freq = params['transducer']['name'], params['frequency']
+        dataset, target = params['dataset']['id'], params['trajectory']
+        traj_type, scan = params['trajectory_type'], params['scan_type']
 
-        if "ID_0082" in item.name and (\
-            ("H317" in item.name and ("250kHz" in item.name )) or \
-            ("Single" in item.name and "500kHz" in item.name) or \
-            ("CTX_500" in item.name and "500kHz" in item.name) or \
-            "DPX_500" in item.name or \
-            "ATAC" in item.name or \
-            "DPXPC_300" in item.name or \
-            "H246" in item.name or \
-            "BSonix" in item.name or \
-            ("REMOPD" in item.name and "490kHz" in item.name) or \
-            "I12378" in item.name or \
-            "R15148" in item.name or \
-            "R15287" in item.name or \
-            "R15473" in item.name or \
-            "R15646" in item.name or \
-            "IGT64_500" in item.name) and \
-            "PETRA" not in item.name and \
-            "brainsight" in item.name:
-            if ("NONE" in item.name or "CT" in item.name or "ZTE" in item.name):
-                item.add_marker(pytest.mark.all_targets_babelbrain_params)
-            if "NONE" in item.name or "CT" in item.name:
-                item.add_marker(pytest.mark.ct_targets_babelbrain_params)
-           
-        if "Superficial_Target" in item.name and \
-            "ID_0082" not  in item.name and \
-            "Single" in item.name and \
-            "slicer" in item.name and \
-            ("CT" in item.name or "NONE" in item.name):
+        def selects(marker):
+            return marker_selects_transducer(marker, tx, freq)
+
+        if dataset == 'ID_0082' and traj_type == 'brainsight':
+            if target == 'Deep_Target_Left' and scan in ('NONE', 'CT', 'ZTE') and selects('basic_babelbrain_params'):
+                item.add_marker(pytest.mark.basic_babelbrain_params)
+            if selects('all_targets_babelbrain_params'):
+                if scan in ('NONE', 'CT', 'ZTE'):
+                    item.add_marker(pytest.mark.all_targets_babelbrain_params)
+                if scan in ('NONE', 'CT'):
+                    item.add_marker(pytest.mark.ct_targets_babelbrain_params)
+            if target == 'Deep_Target_Left' and scan == 'NONE' and selects('bare_min_babelbrain_params'):
+                item.add_marker(pytest.mark.bare_min_babelbrain_params)
+
+        if (target == 'Superficial_Target_Left' and dataset != 'ID_0082' and tx == 'Single'
+                and traj_type == 'slicer' and scan in ('CT', 'NONE')):
             item.add_marker(pytest.mark.orig_paper_params)
-
-        if "Deep_Target" in item.name and \
-            "ID_0082" in item.name and (\
-            ("H317" in item.name and ("250kHz" in item.name )) or \
-            ("Single" in item.name and "250kHz" in item.name) or \
-            "CTX_250" in item.name or \
-            "H246" in item.name or \
-            "BSonix" in item.name or \
-            ("REMOPD" in item.name and "300kHz" in item.name)) or \
-            "PETRA" not in item.name and \
-            "brainsight" in item.name and \
-            ("NONE" in item.name):
-            item.add_marker(pytest.mark.bare_min_babelbrain_params)
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item,call):

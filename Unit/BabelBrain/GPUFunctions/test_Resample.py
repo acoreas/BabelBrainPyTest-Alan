@@ -1,15 +1,14 @@
 import logging
 import re
 
-import nibabel
-from nibabel import processing, nifti1, affines
+from nibabel import processing, nifti1
 import numpy as np
 import pytest
 
 from BabelBrain.GPUFunctions.GPUResample import Resample
 
 @pytest.mark.step1
-def test_Resample_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_gpu_device,load_files,get_mpl_plot,compare_data,request):
+def test_Resample_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_gpu_device,load_files,resample_grid,cached_cpu_truth,gpu_vs_cpu_plot,compare_data,request):
         
     # Parameters
     input_folder = dataset['folder_path']
@@ -28,21 +27,9 @@ def test_Resample_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_gpu
     # Load inputs
     input_data = load_files(input_files)
 
-    # Resample Data
-    zooms = np.asarray(input_data[file_type].header.get_zooms())
-    new_zooms = np.full(3,spatial_step)
-    logging.info(f"Original zooms: {zooms}")
-    logging.info(f"New zooms: {new_zooms}")
-    new_x_dim = int(input_data[file_type].shape[0]/(new_zooms[0]/zooms[0]))
-    new_y_dim = int(input_data[file_type].shape[1]/(new_zooms[1]/zooms[1]))
-    new_z_dim = int(input_data[file_type].shape[2]/(new_zooms[2]/zooms[2]))
-    new_affine = affines.rescale_affine(input_data[file_type].affine.copy(),
-                                        input_data[file_type].shape,
-                                        new_zooms,
-                                        (new_x_dim,new_y_dim,new_z_dim))
-    
-    # Output dimensions
-    output_data = np.zeros((new_x_dim,new_y_dim,new_z_dim),dtype=np.uint8)
+    # Output grid
+    new_affine, new_shape = resample_grid(input_data[file_type],spatial_step)
+    output_data = np.zeros(new_shape,dtype=np.uint8)
     output_nifti = nifti1.Nifti1Image(output_data,new_affine)
     logging.info(f"Output Dimensions: {output_data.shape}")
     logging.info(f"Output Size: {output_data.size}")
@@ -51,23 +38,16 @@ def test_Resample_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_gpu
     logging.info('Running resample step via GPU')
     nifti_resampled_gpu = Resample.ResampleFromTo(input_data[file_type],output_nifti,mode='constant',order=order,cval=input_data[file_type].get_fdata().min(),GPUBackend=computing_backend['type'])
     data_resampled_gpu = nifti_resampled_gpu.get_fdata()
-    try:
-        logging.info('Reloading resample truth')
-        nifti_resampled_cpu = load_files([output_fnames['Output_Truth']],skip_test=False)[0]
-        data_resampled_cpu = nifti_resampled_cpu.get_fdata()
-    except:
-        logging.info("File doesn't exist")
-        logging.info('Generating resample truth')
-        nifti_resampled_cpu = processing.resample_from_to(input_data[file_type],output_nifti,mode='constant',order=order,cval=input_data[file_type].get_fdata().min())
-        data_resampled_cpu = nifti_resampled_cpu.get_fdata()
-        logging.info('Saving file for future use')
-        nibabel.save(nifti_resampled_cpu,output_fnames['Output_Truth'])
+    data_resampled_cpu = cached_cpu_truth(
+        output_fnames['Output_Truth'],
+        lambda: processing.resample_from_to(input_data[file_type],output_nifti,mode='constant',order=order,cval=input_data[file_type].get_fdata().min()).get_fdata(),
+        affine=new_affine,dtype=None)
 
     # Save plot screenshot to be added to html report later
     request.node.screenshots = []
     plots = [input_data[file_type].get_fdata(),data_resampled_cpu,data_resampled_gpu]
     plot_names = ['Original Data', 'CPU Resample\nOutput (Truth)', 'GPU Resample\nOutput']
-    screenshot = get_mpl_plot(plots, axes_num=3,titles=plot_names,color_map='gray')
+    screenshot = gpu_vs_cpu_plot(plots,plot_names,data_resampled_cpu,data_resampled_gpu)
     request.node.screenshots.append(screenshot)
     
     # Calculate Bhatt Coefficient

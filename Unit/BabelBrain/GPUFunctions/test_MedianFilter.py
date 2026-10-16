@@ -1,7 +1,6 @@
 import logging
 import re
 
-import nibabel
 import numpy as np
 import pytest
 from scipy import ndimage
@@ -9,7 +8,7 @@ from scipy import ndimage
 from BabelBrain.GPUFunctions.GPUMedianFilter import MedianFilter
 
 @pytest.mark.step1
-def test_MedianFilter_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_gpu_device,load_files,get_resampled_input,get_mpl_plot,compare_data,request):
+def test_MedianFilter_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_gpu_device,load_files,get_resampled_input,cached_cpu_truth,gpu_vs_cpu_plot,compare_data,request):
         
      # Parameters
      input_folder = dataset['folder_path']
@@ -42,23 +41,15 @@ def test_MedianFilter_vs_CPU(computing_backend,dataset,spatial_step,check_os,get
      CT_data = np.ascontiguousarray(input_data['CT'].get_fdata().astype(np.uint8))
      logging.info('Running Median Filter via GPU')
      data_median_filter_gpu = MedianFilter.MedianFilter(CT_data,filter_size,GPUBackend=computing_backend['type'])
-     try:
-          logging.info('Reloading median filter truth')
-          nifti_median_filter_cpu = load_files([output_fnames['Output_Truth']],skip_test=False)[0]
-          data_median_filter_cpu = nifti_median_filter_cpu.get_fdata()
-     except:
-          logging.info("File doesn't exist")
-          logging.info('Generating median filter truth')
-          data_median_filter_cpu = ndimage.median_filter(CT_data,filter_size)
-          nifti_median_filter_cpu = nibabel.Nifti1Image(data_median_filter_cpu,resampled_nifti.affine)
-          logging.info('Saving file for future use')
-          nibabel.save(nifti_median_filter_cpu,output_fnames['Output_Truth'])
+     data_median_filter_cpu = cached_cpu_truth(output_fnames['Output_Truth'],
+                                               lambda: ndimage.median_filter(CT_data,filter_size),
+                                               affine=resampled_nifti.affine,dtype=None)
 
      # Save plot screenshot to be added to html report later
      request.node.screenshots = []
      plots = [resampled_data,data_median_filter_cpu,data_median_filter_gpu]
      plot_names = ['Resampled Data','CPU Median Filter\nOutput (Truth)', 'GPU Median\n Filter Output']
-     screenshot = get_mpl_plot(plots, axes_num=3,titles=plot_names,color_map='gray')
+     screenshot = gpu_vs_cpu_plot(plots,plot_names,data_median_filter_cpu,data_median_filter_gpu)
      request.node.screenshots.append(screenshot)
      
      # Calculate dice coefficient
