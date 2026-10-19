@@ -1071,7 +1071,7 @@ def pytest_generate_tests(metafunc):
         
     for name in ('scan_type', 'second_scan_type'):
         if wants(name):
-            metafunc.parametrize(name, [item + '_Extra_Scan' for item in list(CT_TYPES)])
+            metafunc.parametrize(name, list(CT_TYPES), ids=[f"{item}_Extra_Scan" for item in CT_TYPES])
 
     if wants('transducer'):
         if 'frequency' in metafunc.fixturenames:
