@@ -62,7 +62,9 @@ where high_res and stress_res are **much slower** to run due to higher resolutio
 pytest Tests/Unit -m "gpu and not release_exclude"
 ```
 
-runs the release set, and the real datasets at high resolution can still be selected explicitly, e.g. `pytest Tests/Unit -k "ID_0082-High_Res and Metal"`. Each GPU test's report entry shows the inputs, the CPU and GPU outputs and a |GPU - CPU| difference panel (maximum over the volume, with the number of differing voxels); the voxelization test plots the voxels only one of them found.
+runs the release set, and the real datasets at high resolution can still be selected explicitly, e.g. `pytest Tests/Unit -k "ID_0082-High_Res and Metal"`. Each GPU test's report entry shows the inputs, the CPU and GPU outputs and a |GPU - CPU| difference panel (with the number of differing voxels in the whole volume), with a slider that moves the slice position through all three axes; the voxelization test shows the skin mesh, both voxelizations and the voxels only one of them found, with a slider that moves the camera around the mesh.
+
+All plots in the reports use the same viewer ([report_viewers.py](report_viewers.py)): drag the slider (slice position, camera position, pipeline step, ...) or press Play to step through. All panels of a viewer stay on the same frame, and nothing plays until you press Play. Screenshots of the GUI (e.g. after each step of the full pipeline tests) are shown as plain images.
 
 For a quick check on your machine's backend:
 
@@ -220,7 +222,7 @@ pytest -k "test_full_pipeline_two_outputs"
 
 This will also run tests for different tolerances (e.g. 0%,1%,5%) which you can specify (same as previous section). Note that we don't include the "basic_babelbrain_params" marker since it should be used when generating the outputs beforehand.
 
-The html report breaks the comparison down by matching subfolder (i.e. one section per compared parameter set/device), each showing the reference and test file paths and tolerance used. For any mismatched 3D field, it embeds an interactive slice viewer (reference, test, and diff side by side, sharing a fixed color scale across slices) with a slider you can drag to any slice, plus a Play/Pause button to auto-scan through the volume — all self-contained in the html file, no server needed. To keep report size/generation time reasonable, each viewer samples up to 24 slices spread evenly across the volume rather than every slice. Mismatched single-value variables (e.g. scalar summary metrics) are listed in a table with their reference/test values and absolute/relative differences.
+The html report breaks the comparison down by matching subfolder (i.e. one section per compared parameter set/device), each showing the reference and test file paths and tolerance used. For any mismatched 3D field, it embeds a slice viewer (reference, test, and diff side by side, sharing a fixed color scale across slices) with a slider you can drag to any slice and a Play button to step through the volume, all self-contained in the html file, no server needed. To keep report size/generation time reasonable, each viewer samples up to 24 slices spread evenly across the volume rather than every slice. Mismatched single-value variables (e.g. scalar summary metrics) are listed in a table with their reference/test values and absolute/relative differences.
 
 ## Running a BabelBrain Generating_Outputs "Test"
 The test_generate_valid_outputs "test" is used not to check BabelBrain proper functionality, but to leverage pytest and qtbot to automatically generate outputs for various BabelBrain parameters to be used later in regression tests.

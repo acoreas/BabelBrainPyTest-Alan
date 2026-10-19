@@ -8,6 +8,7 @@ import pytest
 import trimesh
 
 import BabelBrain.BabelDatasetPreps as bdp
+from Tests.report_viewers import slider_viewer_entry
 
 @pytest.mark.step1
 class TestBabelDatasetPreps:
@@ -44,8 +45,8 @@ class TestBabelDatasetPreps:
             output_meshes[intersection_type] = bdp.DoIntersect(mesh1,mesh2)
 
             # Save plot screenshot to be added to html report later
-            screenshot = save_intersection_plot(mesh1,mesh2,output_meshes[intersection_type])
-            request.node.screenshots.append(screenshot)
+            request.node.screenshots.append(slider_viewer_entry(
+                [(intersection_type, save_intersection_plot(mesh1,mesh2,output_meshes[intersection_type]))], frame_label='View'))
 
         # Compare stl data
         compare_stl_area_func = compare_data['stl_area']
@@ -98,8 +99,7 @@ class TestBabelDatasetPreps:
         # Save plot screenshot to be added to html report later
         request.node.screenshots = []
         save_mesh_plot = get_pyvista_plot['mesh_plot']
-        screenshot = save_mesh_plot([skin_stl,box_stl])
-        request.node.screenshots.append(screenshot)
+        request.node.screenshots.append(slider_viewer_entry([('Skin and box', save_mesh_plot([skin_stl,box_stl]))], frame_label='View'))
             
         # Run intersection steps
         with pytest.raises(ValueError) as exc_info:

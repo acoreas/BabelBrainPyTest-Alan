@@ -373,7 +373,8 @@ def _set_cone_distance(bb):
 
 
 def run_pipeline(qtbot, bb, last_step=3, screenshots=None, image_to_base64=None, export_maps=True):
-    """Run BabelBrain steps 1..last_step (plus exports after step 3). Raises PipelineError on failure."""
+    """Run BabelBrain steps 1..last_step (plus exports after step 3), adding a screenshot of the GUI
+    after each step to `screenshots`. Raises PipelineError on failure."""
     bb.testing_error = False
     bb.Widget.CalculatePlanningMask.click()
     _wait_for_step(qtbot, bb, 1, screenshots, image_to_base64)

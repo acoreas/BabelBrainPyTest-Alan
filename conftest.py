@@ -19,7 +19,6 @@ import pytest_html
 import pyvista as pv
 import SimpleITK as sitk
 import trimesh
-import uuid
 from BabelViscoFDTD.H5pySimple import ReadFromH5py
 from nibabel import affines, nifti1, processing
 from PIL import Image
@@ -42,87 +41,9 @@ from Tests.parameters import (COMPUTING_BACKENDS, CT_TYPE_FILES, CT_TYPES,
                               gen_output_dir, gpu_device,
                               marker_selects_transducer, ref_output_dir,
                               ref_output_dir_2, test_data_folder)
+from Tests.report_viewers import slider_viewer_entry, slider_viewer_html
 
 print('Using GPU device: ',gpu_device)
-
-# ================================================================================================================================
-# HTML REPORT HELPERS
-# ================================================================================================================================
-def synced_frames_viewer_html(panels,frame_label='Frame',interval_ms=120,width=320):
-    """Side-by-side image sequences played in lockstep: one slider and one Play/Pause button drive
-    every panel from the same frame index, so all panels start together and run at the same speed.
-    panels: list of (caption, [base64 webp frames]), all with the same number of frames and size.
-
-    Every frame is decoded once up front and then drawn onto a <canvas> per panel. Swapping an
-    <img> src to a new data URL instead makes the browser decode each frame as it's shown, which
-    flickers when several large panels change every few hundred milliseconds.
-
-    pytest-html inserts report extras through innerHTML, so <script> tags would never run;
-    everything is wired through inline on*="" attributes instead (as the h5 slice viewer does). The
-    frames ride in a data-* attribute and are parsed once, then cached on the container.
-
-    pytest-html can insert the same extra more than once, so each handler works only on the
-    container it sits in (this.parentNode), never on document.getElementById: otherwise the timer of
-    an earlier copy keeps drawing its own frame index onto the live canvases, which shows as an
-    out-of-sequence frame every so often. A timer also stops once its container leaves the page."""
-    n_frames = len(panels[0][1])
-    assert all(len(frames) == n_frames for _, frames in panels), "all panels need the same number of frames"
-    frame_w, frame_h = Image.open(BytesIO(base64.b64decode(panels[0][1][0]))).size
-    wid = f"syncviewer_{uuid.uuid4().hex[:8]}"
-    frames_json = '[' + ','.join('[' + ','.join(f'"{b}"' for b in frames) + ']' for _, frames in panels) + ']'
-
-    # show(c,v) draws frame v of every panel of viewer c (only once all its frames are decoded)
-    show_js = (
-        "var c=this.parentNode;"
-        "function show(c,v){"
-        "if(!c._ready){return;}"
-        "var cvs=c.querySelectorAll('canvas');"
-        "for(var k=0;k<c._imgs.length;k++){cvs[k].getContext('2d').drawImage(c._imgs[k][v],0,0);}"
-        f"c.querySelector('[data-role=label]').textContent='{frame_label} '+(v+1)+'/'+c._imgs[0].length;}}"
-    )
-    slider_oninput = show_js + "show(c,parseInt(this.value,10));"
-    play_onclick = (
-        show_js +
-        "if(!c._ready){return;}"
-        "var slider=c.querySelector('[data-role=slider]');"
-        "if(c._timer){clearInterval(c._timer);c._timer=null;this.textContent='Play';return;}"
-        "this.textContent='Pause';"
-        "var timer=c._timer=setInterval(function(){"
-        "if(!c.isConnected){clearInterval(timer);return;}"  # this copy was replaced in the report
-        "var v=(parseInt(slider.value,10)+1)%c._imgs[0].length;"
-        "slider.value=v;show(c,v);"
-        f"}},{interval_ms});"
-    )
-    # Runs once per copy, when its hidden first frame has loaded: decode every frame, draw frame 0, autoplay
-    init_onload = (
-        show_js +
-        "if(c._started){return;}"
-        "c._started=true;"
-        "var frames=JSON.parse(c.dataset.frames);"
-        "var pending=[];"
-        "c._imgs=frames.map(function(panel){return panel.map(function(b){"
-        "var im=new Image();im.src='data:image/webp;base64,'+b;"
-        "pending.push(im.decode?im.decode():Promise.resolve());return im;});});"
-        "Promise.all(pending).then(function(){"
-        "c._ready=true;show(c,0);"
-        "c.querySelector('[data-role=play]').click();});"
-    )
-    cells = ''.join(
-        f"<td style='text-align:center;vertical-align:top'>"
-        f"<canvas width='{frame_w}' height='{frame_h}' style='width:{width}px;height:{width*frame_h//frame_w}px'></canvas>"
-        f"<div style='font-size:12px'>{caption}</div></td>"
-        for caption, _ in panels)
-    # img, slider, label and button must stay direct children of the container (handlers use this.parentNode)
-    return f"""
-<div id='{wid}' data-frames='{frames_json}' style='text-align:center;margin:4px 0 12px 0'>
-  <img src='data:image/webp;base64,{panels[0][1][0]}' style='display:none' onload="{init_onload}">
-  <table style='margin:auto'><tr>{cells}</tr></table>
-  <input type='range' data-role='slider' min='0' max='{n_frames-1}' value='0' style='width:{width*len(panels)}px'
-    oninput="{slider_oninput}"><br>
-  <span data-role='label'>Loading frames...</span>
-  <button type='button' data-role='play' style='margin-left:8px' onclick="{play_onclick}">Play</button>
-</div>
-"""
 
 # ================================================================================================================================
 # PYTEST FIXTURES
@@ -503,59 +424,8 @@ def compare_data(get_rmse):
                 frames_b64.append(base64.b64encode(buffer.getvalue()).decode('utf-8'))
             plt.close(fig)
 
-            wid = f"volviewer_{uuid.uuid4().hex[:8]}"
-            frames_json = '[' + ','.join(f'"{b}"' for b in frames_b64) + ']'
-            # pytest-html injects "extra" html via innerHTML at runtime, so <script>
-            # tags here would never execute. Everything below is wired through inline
-            # on*="" attributes instead, which the browser still activates on elements
-            # created via innerHTML. Frame data rides in a data-* attribute (single-quoted,
-            # so the embedded base64/JSON double quotes need no escaping) and is parsed
-            # once, then cached on the container element to avoid re-parsing per drag tick.
-            get_frames_js = (
-                f"var c=document.getElementById('{wid}');"
-                "if(!c._frames){c._frames=JSON.parse(c.dataset.frames);}"
-                "var frames=c._frames;"
-            )
-            show_slice_js = (
-                "var i=parseInt(this.value,10);"
-                f"document.getElementById('{wid}_img').src='data:image/webp;base64,'+frames[i];"
-                f"document.getElementById('{wid}_label').textContent='Slice '+(i+1)+'/'+frames.length;"
-            )
-            slider_oninput = get_frames_js + show_slice_js
-            play_onclick = (
-                get_frames_js +
-                f"var slider=document.getElementById('{wid}_slider');"
-                f"var img=document.getElementById('{wid}_img');"
-                f"var label=document.getElementById('{wid}_label');"
-                "if(c._timer){clearInterval(c._timer);c._timer=null;this.textContent='Play';return;}"
-                "this.textContent='Pause';"
-                "c._timer=setInterval(function(){"
-                "var v=(parseInt(slider.value,10)+1)%frames.length;"
-                "slider.value=v;"
-                "img.src='data:image/webp;base64,'+frames[v];"
-                "label.textContent='Slice '+(v+1)+'/'+frames.length;"
-                "},150);"
-            )
-            # The <img>'s onload fires every time its src is swapped (i.e. every frame),
-            # so it's guarded to only kick off autoplay once, the first time the widget's
-            # initial frame finishes loading (which happens even though it was inserted
-            # via innerHTML, same as the on*="" attributes above).
-            autoplay_onload = (
-                f"var c=document.getElementById('{wid}');"
-                "if(!c._autoplayStarted){"
-                "c._autoplayStarted=true;"
-                f"document.getElementById('{wid}_play').click();"
-                "}"
-            )
-            return f"""
-<div id='{wid}' data-frames='{frames_json}' style='text-align:center;margin:4px 0 12px 0'>
-  <img id='{wid}_img' src='data:image/webp;base64,{frames_b64[0]}' width='900' onload="{autoplay_onload}"><br>
-  <input type='range' id='{wid}_slider' min='0' max='{len(frames_b64)-1}' value='0' style='width:900px'
-    oninput="{slider_oninput}"><br>
-  <span id='{wid}_label'>Slice 1/{len(frames_b64)}</span>
-  <button type='button' id='{wid}_play' style='margin-left:8px' onclick="{play_onclick}">Play</button>
-</div>
-"""
+            return slider_viewer_html([('', frames_b64)], frame_names=[f'Slice {z+1}/{nz}' for z in frame_indices],
+                                      start=len(frame_indices)//2, width=630)
 
         section_title = label if label else os.path.basename(os.path.dirname(h5_ref_path))
         node_screenshots.append({
@@ -646,7 +516,7 @@ def compare_data(get_rmse):
                                     fn=h5_ref_path.split(os.sep)[-2]
 
                                 viewer_html = make_volume_slice_viewer(data1,data2,diff3d,title=f'{fn}\n{name}  Tol={tolerance}',dlabel=dlabel,unit=unit,diff_unit=diff_unit)
-                                node_screenshots.append({'kind': 'html','html': f"<div><strong>{name}</strong> &mdash; drag the slider or press Play to scan through the volume</div>{viewer_html}"})
+                                node_screenshots.append({'kind': 'html','html': f"<div><strong>{name}</strong> &mdash; drag the slider to scan through the volume</div>{viewer_html}"})
                         else:
                             logging.warning(f"Dataset {name} differs in shape: {data1.shape} vs {data2.shape}")
                             array_results.append((name, str(data1.shape), str(data2.shape), None, None, None, None, False))
@@ -824,67 +694,85 @@ def image_to_base64():
 
 @pytest.fixture()
 def get_mpl_plot():
-    def _get_mpl_plot(datas,axes_num=1,titles=None,color_map='viridis',colorbars=False,max_projection=None,zero_based=None):
-        """Mid slices of each volume along the first `axes_num` axes (one row per axis).
-        color_map may be one map or one per volume; max_projection (one bool per volume) shows the
-        maximum through the volume instead of the mid slice; zero_based (one bool per volume) starts
-        that volume's colour scale at 0 (e.g. absolute differences, so no difference is the lowest colour)."""
+    def _get_mpl_plot(datas,axes_num=1,titles=None,color_map='viridis',colorbars=False,zero_based=None,n_positions=24):
+        """Report entry with a slider over slice position: one row per axis (the first `axes_num`),
+        one column per volume, each row showing the slice at the slider's position along that axis.
+        color_map may be one map or one per volume; zero_based (one bool per volume) starts that
+        volume's colour scale at 0 (e.g. absolute differences, so no difference is the lowest colour).
+        Colour scales are fixed per volume so they don't change between slices."""
         data_num = len(datas)
         color_maps = color_map if isinstance(color_map,(list,tuple)) else [color_map]*data_num
-        max_projection = max_projection or [False]*data_num
         zero_based = zero_based or [False]*data_num
-        fig, axs = plt.subplots(axes_num, data_num, figsize=(data_num * 2.5, axes_num * 2.5), squeeze=False)
+        datas = [np.asarray(d) for d in datas]
+        limits = []
+        for num, data in enumerate(datas):
+            vmax = float(np.nanmax(data)) if data.size else 1.0
+            vmin = 0.0 if zero_based[num] else (float(np.nanmin(data)) if data.size else 0.0)
+            if vmax <= vmin:  # constant volume, e.g. no differences at all
+                vmax = vmin + 1.0
+            limits.append((vmin, vmax))
 
+        def slice_of(data, axis, fraction):
+            index = int(round(fraction*(data.shape[axis]-1)))
+            image = np.take(data, index, axis=axis).astype(np.float64)
+            return (np.rot90(image) if axis < 2 else image), index
+
+        positions = np.linspace(0, 1, n_positions)
+        fig, axs = plt.subplots(axes_num, data_num, figsize=(data_num * 2.5, axes_num * 2.5), squeeze=False, dpi=80)
+        images, row_labels = [], []
         for axis in range(axes_num):
+            row = []
             for num in range(data_num):
-                data = np.asarray(datas[num], dtype=np.float64)
-                if max_projection[num]:
-                    image = np.max(data, axis=axis)
-                else:
-                    image = np.take(data, data.shape[axis]//2, axis=axis)
-                if axis < 2:
-                    image = np.rot90(image)
-                vmin, vmax = (0, max(float(image.max()), 1e-12)) if zero_based[num] else (None, None)
-                im = axs[axis,num].imshow(image, cmap=color_maps[num], vmin=vmin, vmax=vmax)
+                image, _ = slice_of(datas[num], axis, positions[0])
+                im = axs[axis,num].imshow(image, cmap=color_maps[num], vmin=limits[num][0], vmax=limits[num][1])
                 if colorbars:
                     plt.colorbar(im, ax=axs[axis,num], fraction=0.046)
                 if titles is not None and axis == 0:
                     axs[axis,num].set_title(titles[num], fontsize=10)
-
+                row.append(im)
+            images.append(row)
+            # Widest label text up front so tight_layout leaves room for it
+            row_labels.append(axs[axis,0].set_ylabel(f"axis {axis}, slice {datas[0].shape[axis]}/{datas[0].shape[axis]}"))
         plt.tight_layout()
 
-        # Save the plot to a BytesIO object
-        buffer = BytesIO()
-        plt.savefig(buffer, format='webp')
+        frames = []
+        for fraction in positions:
+            for axis in range(axes_num):
+                for num in range(data_num):
+                    image, index = slice_of(datas[num], axis, fraction)
+                    images[axis][num].set_data(image)
+                    if num == 0:
+                        row_labels[axis].set_text(f"axis {axis}, slice {index+1}/{datas[0].shape[axis]}")
+            buffer = BytesIO()
+            fig.savefig(buffer, format='webp')
+            frames.append(base64.b64encode(buffer.getvalue()).decode('utf-8'))
         plt.close(fig)
-        buffer.seek(0)
 
-        # Encode the image data as base64 string
-        return base64.b64encode(buffer.getvalue()).decode('utf-8')
+        return slider_viewer_entry([('', frames)], frame_label='Slice position', start=n_positions//2)
 
     return _get_mpl_plot
 
 @pytest.fixture()
 def gpu_vs_cpu_plot(get_mpl_plot):
     def _gpu_vs_cpu_plot(plots,titles,cpu_output,gpu_output,color_map='gray'):
-        """`plots` (inputs, CPU and GPU outputs) plus a |GPU - CPU| panel. The difference panel is a
-        maximum projection so differences anywhere in the volume are visible."""
+        """`plots` (inputs, CPU and GPU outputs) plus a |GPU - CPU| panel, all sliced together. The
+        difference panel's title gives the number of differing voxels in the whole volume."""
         diff = np.abs(np.asarray(gpu_output,dtype=np.float64) - np.asarray(cpu_output,dtype=np.float64))
         n_diff = int(np.count_nonzero(diff))
         return get_mpl_plot(list(plots) + [diff],
                             axes_num=3,
-                            titles=list(titles) + [f"|GPU - CPU| (max)\n{n_diff} voxels differ"],
+                            titles=list(titles) + [f"|GPU - CPU|\n{n_diff} voxels differ"],
                             color_map=[color_map]*len(plots) + [plt.cm.jet],
                             colorbars=True,
-                            max_projection=[False]*len(plots) + [True],
                             zero_based=[False]*len(plots) + [True])
 
     return _gpu_vs_cpu_plot
 
 @pytest.fixture
 def get_pyvista_plot():
-    """3D plots of meshes and voxels for the html report. Every plot returns a base64 WebP of a single
-    view, or with video=True a list of orbit frames to play with synced_frames_viewer_html."""
+    """3D plots of meshes and voxels for the html report. Every plot returns the frames of a camera
+    orbit around its reference mesh; show them with report_viewers.slider_viewer_entry, where the
+    slider moves the camera (several plots of the same mesh line up frame by frame)."""
 
     def _plotter(size=500):
         plotter = pv.Plotter(window_size=(size, size),off_screen=True)
@@ -893,7 +781,7 @@ def get_pyvista_plot():
 
     def _orbit_frames(plotter,reference_mesh,n_frames):
         """Frames (base64 WebP) of the camera making a full turn around the scene while sweeping from
-        60 degrees above to 60 degrees below it. The camera is fitted to reference_mesh rather than to
+        60 degrees above to 60 degrees below it, so every side can be reached with the slider. The camera is fitted to reference_mesh rather than to
         the scene, so plots sharing that mesh are framed identically and their frames line up."""
         plotter.show(auto_close=False)
         bounds = np.asarray(pv.wrap(reference_mesh).bounds).reshape(3, 2)
@@ -915,41 +803,35 @@ def get_pyvista_plot():
         plotter.close()
         return frames
 
-    def _render(plotter,reference_mesh,video=False,n_frames=48):
-        """base64 WebP of a single view, or with video=True the list of orbit frames (show them
-        with synced_frames_viewer_html)."""
-        if video:
-            return _orbit_frames(plotter,reference_mesh,n_frames)
-        buffer = BytesIO()
-        plotter.show(screenshot=buffer)
-        return base64.b64encode(buffer.getvalue()).decode('utf-8')
+    def _render(plotter,reference_mesh,n_frames=36):
+        return _orbit_frames(plotter,reference_mesh,n_frames)
 
     def _add_points(plotter,points,max_points,**kwargs):
         step = max(1, len(points)//max_points) # Plot at most ~max_points points
         plotter.add_mesh(pv.PolyData(np.asarray(points[::step],dtype=np.float64)),**kwargs)
 
-    def intersection_plot(mesh1,mesh2,mesh3,video=False):
+    def intersection_plot(mesh1,mesh2,mesh3):
         plotter = _plotter(400)
         plotter.add_mesh(mesh1, opacity=0.2)
         plotter.add_mesh(mesh2, opacity=0.2)
         plotter.add_mesh(mesh3, opacity=0.5, color='red')
-        return _render(plotter,mesh1,video)
+        return _render(plotter,mesh1)
 
-    def mesh_plot(meshes,title='',video=False):
+    def mesh_plot(meshes,title=''):
         plotter = _plotter()
         for mesh in meshes:
             plotter.add_mesh(pv.wrap(mesh),opacity=0.5,show_scalar_bar=False)
         plotter.add_title(title, font_size=12)
-        return _render(plotter,meshes[0],video)
+        return _render(plotter,meshes[0])
 
-    def voxel_plot(mesh,Points,title='',video=False):
+    def voxel_plot(mesh,Points,title=''):
         plotter = _plotter()
         plotter.add_mesh(pv.wrap(mesh),opacity=0.5,show_scalar_bar=False)
         _add_points(plotter,Points,1000000,color='blue',opacity=0.1)
         plotter.add_title(title,font_size=12)
-        return _render(plotter,mesh,video)
+        return _render(plotter,mesh)
 
-    def difference_plot(mesh,only_gpu_points,only_cpu_points,title='',video=False):
+    def difference_plot(mesh,only_gpu_points,only_cpu_points,title=''):
         """Skin mesh with the voxels found by only one of the GPU (red) and CPU (blue) calculations."""
         plotter = _plotter()
         plotter.add_mesh(pv.wrap(mesh),opacity=0.2,color='lightgray',show_scalar_bar=False)
@@ -959,7 +841,7 @@ def get_pyvista_plot():
         if len(only_gpu_points) or len(only_cpu_points):
             plotter.add_legend(loc='lower left',size=(0.4,0.1),bcolor='white')
         plotter.add_title(title,font_size=10)
-        return _render(plotter,mesh,video)
+        return _render(plotter,mesh)
 
     # Return the fixture object with the specified attribute
     return {'intersection_plot': intersection_plot,'mesh_plot': mesh_plot,'voxel_plot': voxel_plot,

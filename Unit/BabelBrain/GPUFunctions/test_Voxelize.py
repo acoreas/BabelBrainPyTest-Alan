@@ -7,7 +7,7 @@ import pytest
 
 from BabelBrain.GPUFunctions.GPUVoxelize import Voxelize
 from BabelBrain.BabelDatasetPreps import FixMesh
-from Tests.conftest import synced_frames_viewer_html
+from Tests.report_viewers import slider_viewer_entry
 
 @pytest.mark.step1
 def test_Voxelize_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_gpu_device,load_files,resample_grid,cached_cpu_truth,get_pyvista_plot,request):
@@ -48,11 +48,11 @@ def test_Voxelize_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_gpu
      save_voxel_plot = get_pyvista_plot['voxel_plot']
      save_mesh_plot = get_pyvista_plot['mesh_plot']
      request.node.screenshots = []
-     # Orbit frames of every view, played together further down so the mesh and voxels can be
-     # compared from every side
-     orbit_panels = [("Skin mesh", save_mesh_plot([input_data['skin']], title="Skin Mesh", video=True)),
-                     ("CPU voxelization (truth)", save_voxel_plot(input_data['skin'],points_cpu, title="Skin Mesh Voxelized - Truth", video=True)),
-                     ("GPU voxelization (test)", save_voxel_plot(input_data['skin'],points_gpu, title="Skin Mesh Voxelized - Test", video=True))]
+     # Views around the mesh, shown together further down with one slider moving the camera so the
+     # mesh and voxels can be compared from every side
+     orbit_panels = [("Skin mesh", save_mesh_plot([input_data['skin']], title="Skin Mesh")),
+                     ("CPU voxelization (truth)", save_voxel_plot(input_data['skin'],points_cpu, title="Skin Mesh Voxelized - Truth")),
+                     ("GPU voxelization (test)", save_voxel_plot(input_data['skin'],points_gpu, title="Skin Mesh Voxelized - Test"))]
      
      # Convert voxels back to integer 3D indices
      inv_affine = np.linalg.inv(new_affine)
@@ -77,8 +77,8 @@ def test_Voxelize_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_gpu
      only_cpu = np.setdiff1d(keys_cpu, keys_gpu, assume_unique=True)
      orbit_panels.append(("GPU only (red) / CPU only (blue)",
                           get_pyvista_plot['difference_plot'](input_data['skin'],to_world(only_gpu),to_world(only_cpu),
-                                                              title="Voxelization differences", video=True)))
-     request.node.screenshots.append({'kind': 'html', 'html': synced_frames_viewer_html(orbit_panels, frame_label='View')})
+                                                              title="Voxelization differences")))
+     request.node.screenshots.append(slider_viewer_entry(orbit_panels, frame_label='View'))
 
      # Calculate dice coefficient
      dice_coeff = 2 * match_count / (keys_gpu.size + keys_cpu.size)
