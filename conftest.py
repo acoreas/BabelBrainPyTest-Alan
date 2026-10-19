@@ -1042,21 +1042,6 @@ def pytest_generate_tests(metafunc):
     def wants(name):
         return name in metafunc.fixturenames and not _explicitly_parametrized(metafunc, name)
 
-    if wants('trajectory_type'):
-        metafunc.parametrize('trajectory_type', list(TRAJECTORY_TYPES))
-
-    for name in ('scan_type', 'second_scan_type'):
-        if wants(name):
-            metafunc.parametrize(name, list(CT_TYPES))
-
-    if wants('trajectory'):
-        metafunc.parametrize('trajectory', TESTED_INDIVIDUAL_TARGETS)
-
-    res_marks = {'Low_Res': [pytest.mark.low_res],
-                 'Med_Res': [pytest.mark.medium_res],
-                 'High_Res': [pytest.mark.slow, pytest.mark.high_res],
-                 'Stress_Res': [pytest.mark.slow, pytest.mark.stress_res]}
-
     dataset_with_spatial_step = wants('dataset') and wants('spatial_step')
     if dataset_with_spatial_step:
         # GPU unit tests: every spatial step on the small synthetic head and the real datasets. Real
@@ -1072,6 +1057,21 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize('dataset,spatial_step', params)
     elif wants('dataset'):
         metafunc.parametrize('dataset', list(DATASETS.values()), ids=list(DATASETS))
+    
+    if wants('trajectory_type'):
+        metafunc.parametrize('trajectory_type', list(TRAJECTORY_TYPES))
+
+    if wants('trajectory'):
+        metafunc.parametrize('trajectory', TESTED_INDIVIDUAL_TARGETS)
+        
+    for name in ('scan_type', 'second_scan_type'):
+        if wants(name):
+            metafunc.parametrize(name, [item + '_Extra_Scan' for item in list(CT_TYPES)])
+
+    res_marks = {'Low_Res': [pytest.mark.low_res],
+                 'Med_Res': [pytest.mark.medium_res],
+                 'High_Res': [pytest.mark.slow, pytest.mark.high_res],
+                 'Stress_Res': [pytest.mark.slow, pytest.mark.stress_res]}
 
     if wants('transducer'):
         if 'frequency' in metafunc.fixturenames:
