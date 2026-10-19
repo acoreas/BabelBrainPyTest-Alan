@@ -781,10 +781,13 @@ def get_pyvista_plot():
 
     def _orbit_frames(plotter,reference_mesh,n_frames):
         """Frames (base64 WebP) of the camera making a full turn around the scene while sweeping from
-        60 degrees above to 60 degrees below it, so every side can be reached with the slider. The camera is fitted to reference_mesh rather than to
-        the scene, so plots sharing that mesh are framed identically and their frames line up."""
+        60 degrees above to 60 degrees below it, so every side can be reached with the slider. The
+        camera is fitted to reference_mesh (one mesh or a list) rather than to the scene, so plots
+        sharing it are framed identically and their frames line up."""
         plotter.show(auto_close=False)
-        bounds = np.asarray(pv.wrap(reference_mesh).bounds).reshape(3, 2)
+        references = reference_mesh if isinstance(reference_mesh, (list, tuple)) else [reference_mesh]
+        all_bounds = np.array([np.asarray(pv.wrap(m).bounds).reshape(3, 2) for m in references])
+        bounds = np.stack([all_bounds[:, :, 0].min(axis=0), all_bounds[:, :, 1].max(axis=0)], axis=1)
         focal = bounds.mean(axis=1)
         radius = np.linalg.norm(bounds[:, 1] - bounds[:, 0]) / 2
         distance = 1.1 * radius / np.tan(np.radians(plotter.camera.view_angle) / 2)
@@ -810,19 +813,24 @@ def get_pyvista_plot():
         step = max(1, len(points)//max_points) # Plot at most ~max_points points
         plotter.add_mesh(pv.PolyData(np.asarray(points[::step],dtype=np.float64)),**kwargs)
 
-    def intersection_plot(mesh1,mesh2,mesh3):
-        plotter = _plotter(400)
-        plotter.add_mesh(mesh1, opacity=0.2)
-        plotter.add_mesh(mesh2, opacity=0.2)
-        plotter.add_mesh(mesh3, opacity=0.5, color='red')
-        return _render(plotter,mesh1)
+    def intersection_plot(mesh1,mesh2,mesh3=None,title=''):
+        """mesh1 (grey) and mesh2 (blue), with their intersection mesh3 in red when given. Framed to
+        fit both inputs."""
+        plotter = _plotter()
+        plotter.add_mesh(pv.wrap(mesh1), opacity=0.2, color='lightgray', show_scalar_bar=False)
+        plotter.add_mesh(pv.wrap(mesh2), opacity=0.2, color='steelblue', show_scalar_bar=False)
+        if mesh3 is not None:
+            plotter.add_mesh(pv.wrap(mesh3), opacity=0.6, color='red', show_scalar_bar=False)
+        plotter.add_title(title, font_size=10)
+        return _render(plotter,[mesh1,mesh2])
 
-    def mesh_plot(meshes,title=''):
+    def mesh_plot(meshes,title='',color=None):
+        """Meshes framed to fit all of them (default colour, or `color` for every mesh)."""
         plotter = _plotter()
         for mesh in meshes:
-            plotter.add_mesh(pv.wrap(mesh),opacity=0.5,show_scalar_bar=False)
+            plotter.add_mesh(pv.wrap(mesh),opacity=0.5,color=color,show_scalar_bar=False)
         plotter.add_title(title, font_size=12)
-        return _render(plotter,meshes[0])
+        return _render(plotter,list(meshes))
 
     def voxel_plot(mesh,Points,title=''):
         plotter = _plotter()

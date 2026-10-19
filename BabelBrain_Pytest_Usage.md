@@ -415,19 +415,23 @@ Unit tests should focus primarily on code affected by the release.
         </ul>
       </td>
     </tr>
-    <!-- test_do_intersect_invalid_case -->
+    <!-- TestDoIntersectSynthetic -->
     <tr>
-      <td>test_do_intersect_invalid_case</td>
+      <td>TestDoIntersectSynthetic (test_BabelDatasetPreps.py)</td>
       <td>
-        <b>Test dataset:</b><br>
+        None (spheres, boxes and cones built in the test)<br>
+        <b>Boolean engine:</b><br>
         <ul>
-          <li>ID_0082</li>
-          <li>ernie</li>
+          <li>manifold (default)</li>
+          <li>blender (skipped when Blender isn't installed)</li>
         </ul>
       </td>
       <td>
         <ul>
-          <li>A target outside the head must raise "Trajectory is outside headspace" instead of continuing</li>
+          <li>DoIntersect cuts the skin with the transducer cone and skin/bone/CSF with the FOV box in Step 1</li>
+          <li>Intersection volumes are checked against analytic values (overlapping spheres, spherical sector), plus contained/disjoint cases and the mesh-repair paths (multi-body and open meshes)</li>
+          <li>Every test runs for both engines. Blender variants also show Blender's own result (boolean modifier evaluated in Blender) and save the scene to PyTest_Reports/blender_scenes/ (real-data scenes only with BABEL_PYTEST_SAVE_BLENDER_SCENES=1). If trimesh's Blender booleans return empty meshes, Blender tests that expect an intersection fail with that reason; non-overlapping cases always run</li>
+          <li>Runs in seconds</li>
         </ul>
       </td>
     </tr>
@@ -659,19 +663,56 @@ All applicable unit tests should normally be run.
         </ul>
       </td>
     </tr>
-    <!-- test_do_intersect_invalid_case -->
+    <!-- TestDoIntersectSynthetic -->
     <tr>
-      <td>test_do_intersect_invalid_case</td>
+      <td>TestDoIntersectSynthetic (test_BabelDatasetPreps.py)</td>
       <td>
-        <b>Test dataset:</b><br>
+        None (spheres, boxes and cones built in the test)<br>
+        <b>Boolean engine:</b><br>
         <ul>
-          <li>ID_0082</li>
-          <li>ernie</li>
+          <li>manifold (default)</li>
+          <li>blender (skipped when Blender isn't installed)</li>
         </ul>
       </td>
       <td>
         <ul>
-          <li>A target outside the head must raise "Trajectory is outside headspace" instead of continuing</li>
+          <li>DoIntersect cuts the skin with the transducer cone and skin/bone/CSF with the FOV box in Step 1</li>
+          <li>Intersection volumes are checked against analytic values (overlapping spheres, spherical sector), plus contained/disjoint cases and the mesh-repair paths (multi-body and open meshes)</li>
+          <li>Every test runs for both engines. Blender variants also show Blender's own result (boolean modifier evaluated in Blender) and save the scene to PyTest_Reports/blender_scenes/ (real-data scenes only with BABEL_PYTEST_SAVE_BLENDER_SCENES=1). If trimesh's Blender booleans return empty meshes, Blender tests that expect an intersection fail with that reason; non-overlapping cases always run</li>
+          <li>Runs in seconds</li>
+        </ul>
+      </td>
+    </tr>
+    <!-- TestDoIntersectRealData -->
+    <tr>
+      <td>TestDoIntersectRealData (test_BabelDatasetPreps.py)</td>
+      <td>
+        <b>Test dataset:</b><br>
+        <ul>
+          <li>ID_0082</li>
+          <li>ernie (its charm meshes aren't closed, so DoIntersect's repair path runs)</li>
+        </ul>
+        <b>Trajectory:</b><br>
+        <ul>
+          <li>Superficial Target (left)</li>
+          <li>Deep Target (left)</li>
+        </ul>
+        <b>Mesh / cutter:</b><br>
+        <ul>
+          <li>skin / cone, skin / box, bone / box, CSF / box (as in Step 1)</li>
+          <li>skin / box outside the head (must raise "Trajectory is outside headspace")</li>
+        </ul>
+        <b>Boolean engine:</b><br>
+        <ul>
+          <li>manifold (default)</li>
+          <li>blender (skipped when Blender isn't installed)</li>
+        </ul>
+      </td>
+      <td>
+        <ul>
+          <li>Real charm meshes cut with a Step 1-like cone and FOV box</li>
+          <li>No truth files: results must be closed, inside both inputs and agree with point-inside tests of both inputs (mesh_checks.py)</li>
+          <li>About a minute in total per engine</li>
         </ul>
       </td>
     </tr>
@@ -740,31 +781,6 @@ All applicable unit tests should normally be run.
         <ul>
           <li>Test planTUS feature just to ensure it runs</li>
           <li>Requires simnibs_root_path in config.ini, skipped on BabelBrain versions without PlanTUS</li>
-        </ul>
-      </td>
-    </tr>
-    <!-- test_do_intersect_valid_case -->
-    <tr>
-      <td>test_do_intersect_valid_case</td>
-      <td>
-        <b>Test dataset:</b><br>
-        <ul>
-          <li>ID_0082</li>
-          <li>ernie</li>
-        </ul>
-        <b>Trajectory:</b><br>
-        <ul>
-          <li>Superficial Target (left)</li>
-          <li>Deep Target (left)</li>
-        </ul>
-        <b>Transducer:</b><br>
-        <ul>
-          <li>All</li>
-        </ul>
-      </td>
-      <td>
-        <ul>
-          <li>Currently skipped: needs truth data and a better pass metric</li>
         </ul>
       </td>
     </tr>
