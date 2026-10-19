@@ -1009,7 +1009,9 @@ def get_example_data():
     def numpy_data(dims = (4,4)):
         return np.random.random(dims)
     
-    def nifti_nib_data(dims=(256,256,128)):
+    def nifti_nib_data(dims=(16,16,16)):
+        # Small on purpose: the FileManager tests only hash and compare these files, and gzip-saving
+        # a full-size volume of random (incompressible) data took ~1.5 s per file
         affine = np.random.rand(4,4)
         data = np.random.random(dims)
         nibabel_nifti = nibabel.nifti1.Nifti1Image(data,affine)
