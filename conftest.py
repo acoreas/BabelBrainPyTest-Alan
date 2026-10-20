@@ -34,7 +34,7 @@ import BabelBrain.BabelBrain as bb_module # Needed to get monkeypatch working
 # PARAMETERS (defined in parameters.py)
 # ================================================================================================================================
 from Tests.parameters import (COMPUTING_BACKENDS, CT_TYPE_FILES, CT_TYPES,
-                              DATASETS, RELEASE_REAL_DATASET_SPATIAL_STEPS,
+                              DATASETS, RELEASE_SPATIAL_STEPS,
                               SPATIAL_STEPS, SYNTHETIC_DATASET,
                               SYNTHETIC_DATASET_DIR, TRAJECTORY_TYPES,
                               TESTED_INDIVIDUAL_TARGETS, TRANSDUCERS,
@@ -1059,16 +1059,17 @@ def pytest_generate_tests(metafunc):
     
     dataset_with_spatial_step = wants('dataset') and wants('spatial_step')
     if dataset_with_spatial_step:
-        # GPU unit tests: every spatial step on the small synthetic head and the real datasets. Real
-        # dataset resolutions that release testing skips (they take very long) are marked release_exclude
-        params = [pytest.param(SYNTHETIC_DATASET, value, id=f"synthetic-{key}", marks=res_marks.get(key, []))
+        # GPU unit tests: every spatial step on the small synthetic head and the real datasets, marked
+        # minor_release / major_release for the resolutions in each release set (RELEASE_SPATIAL_STEPS)
+        def release_marks(kind, key):
+            return [getattr(pytest.mark, release) for release, steps in RELEASE_SPATIAL_STEPS.items() if key in steps[kind]]
+        params = [pytest.param(SYNTHETIC_DATASET, value, id=f"synthetic-{key}",
+                               marks=res_marks.get(key, []) + release_marks('synthetic', key))
                   for key, value in SPATIAL_STEPS.items()]
         for ds_id, ds in DATASETS.items():
             for key, value in SPATIAL_STEPS.items():
-                marks = list(res_marks.get(key, []))
-                if key not in RELEASE_REAL_DATASET_SPATIAL_STEPS:
-                    marks.append(pytest.mark.release_exclude)
-                params.append(pytest.param(ds, value, id=f"{ds_id}-{key}", marks=marks))
+                params.append(pytest.param(ds, value, id=f"{ds_id}-{key}",
+                                           marks=res_marks.get(key, []) + release_marks('real', key)))
         metafunc.parametrize('dataset,spatial_step', params)
     elif wants('dataset'):
         metafunc.parametrize('dataset', list(DATASETS.values()), ids=list(DATASETS))
@@ -1107,9 +1108,43 @@ def pytest_generate_tests(metafunc):
                               pytest.param(0.05, marks=pytest.mark.tol_5, id="5%_tolerance")])
 
 
+UNIT_TESTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Unit')
+CONSISTENCY_TESTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'test_suite_consistency.py')
+
+
+def _uses_real_data(item):
+    """Unit test reading the real datasets: parametrized with one of DATASETS or marked real_data."""
+    if item.get_closest_marker('real_data'):
+        return True
+    dataset = getattr(getattr(item, 'callspec', None), 'params', {}).get('dataset')
+    return isinstance(dataset, dict) and dataset.get('id') in DATASETS
+
+
+def _add_release_markers(item):
+    """minor_release / major_release markers for the unit tests and suite consistency checks in each
+    release test set (BabelBrain_Pytest_Usage.md, Tables 3 and 7). GPU unit tests get them from their
+    spatial step (pytest_generate_tests); every other unit test is in the major set, and in the minor
+    set too unless it's slow."""
+    path = str(item.path)
+    if not (path.startswith(UNIT_TESTS_DIR) or path == CONSISTENCY_TESTS):
+        return
+    if 'spatial_step' in getattr(getattr(item, 'callspec', None), 'params', {}):
+        return
+    item.add_marker(pytest.mark.major_release)
+    if not item.get_closest_marker('slow'):
+        item.add_marker(pytest.mark.minor_release)
+
+
 def pytest_collection_modifyitems(config, items):
-    """Add the *_babelbrain_params selection markers based on each test's parameter values
-    (transducer/frequency choices are in parameters.MARKER_TRANSDUCERS)."""
+    """Add the real_data marker to unit tests using the real datasets (deselect them with
+    -m "not real_data"), the minor_release / major_release markers, and the *_babelbrain_params
+    selection markers based on each test's
+    parameter values (transducer/frequency choices are in parameters.MARKER_TRANSDUCERS).
+    E2E, regression, ... tests always use real data and aren't marked."""
+    for item in items:
+        if str(item.path).startswith(UNIT_TESTS_DIR) and _uses_real_data(item):
+            item.add_marker(pytest.mark.real_data)
+        _add_release_markers(item)
     for item in items:
         params = getattr(getattr(item, 'callspec', None), 'params', {})
         if not {'transducer', 'frequency', 'dataset', 'trajectory', 'trajectory_type', 'scan_type'} <= params.keys():

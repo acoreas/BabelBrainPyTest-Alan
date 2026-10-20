@@ -153,9 +153,7 @@ DATASETS = {
 
 # Small synthetic head (synthetic_dataset.py) for the GPU unit tests, generated at the start of each
 # session in the gitignored Tests/.cache folder. GPU unit tests run every spatial step on both the
-# synthetic head and the real datasets; release testing only runs the real datasets at
-# RELEASE_REAL_DATASET_SPATIAL_STEPS (the others are marked release_exclude), since high
-# resolutions of a full head are slow.
+# synthetic head and the real datasets.
 SYNTHETIC_DATASET_DIR = TESTS_DIR / '.cache' / 'synthetic_gpu_dataset'
 SYNTHETIC_DATASET = {
     'id': 'synthetic',
@@ -164,7 +162,7 @@ SYNTHETIC_DATASET = {
     'T1_path': str(SYNTHETIC_DATASET_DIR / 'T1W.nii.gz'),
     'simbNIBS_type': 'charm',
 }
-RELEASE_REAL_DATASET_SPATIAL_STEPS = ['Med_Res']
+
 
 # Targets: test name -> trajectory file stem in <data>/Trajectories/<trajectory type>_<dataset>_<stem>.<ext>
 TRAJECTORIES_DIR = Path(test_data_folder) / 'Trajectories'
@@ -223,6 +221,14 @@ SPATIAL_STEPS = {
     'Med_Res': 0.306,     # 600 kHz,   6 PPW
     'High_Res': 0.184,    # 1000 kHz,  6 PPW
     'Stress_Res': 0.092,  # 1000 kHz, 12 PPW
+}
+
+# GPU unit test spatial steps in each release test set (markers minor_release / major_release, see
+# conftest.py). The synthetic head runs every resolution; the full head real datasets only a
+# cheaper one, since their high resolutions take very long.
+RELEASE_SPATIAL_STEPS = {
+    'minor_release': {'synthetic': list(SPATIAL_STEPS), 'real': ['Low_Res']},
+    'major_release': {'synthetic': list(SPATIAL_STEPS), 'real': ['Med_Res']},
 }
 
 # ================================================================================================================================

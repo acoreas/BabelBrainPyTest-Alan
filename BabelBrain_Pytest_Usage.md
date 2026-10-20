@@ -460,20 +460,18 @@ Unit tests should focus primarily on code affected by the release.
         <ul>
           <li>The backend of the release machine</li>
         </ul>
-        <b>Test dataset:</b><br>
+        <b>Test dataset / Spatial Step:</b><br>
         <ul>
-          <li>synthetic (small generated head, see synthetic_dataset.py)</li>
-        </ul>
-        <b>Spatial Step:</b><br>
-        <ul>
-          <li>Low_Res</li>
-          <li>Med_Res</li>
+          <li>synthetic (small generated head, see synthetic_dataset.py): Low_Res, Med_Res, High_Res, Stress_Res</li>
+          <li>ID_0082: Low_Res</li>
+          <li>ernie: Low_Res (tests needing a CT or T1W.nii.gz in the dataset folder are skipped)</li>
         </ul>
       </td>
       <td>
         <ul>
           <li>Catches GPU kernel regressions against CPU (scipy/scikit-image/trimesh) reference outputs</li>
-          <li>The small synthetic head keeps the run to seconds, the CPU references are cached after the first run</li>
+          <li>The small synthetic head covers every resolution quickly; the full head datasets run at the cheapest resolution (RELEASE_SPATIAL_STEPS in parameters.py)</li>
+          <li>CPU references are cached after the first run</li>
         </ul>
       </td>
     </tr>
@@ -487,7 +485,7 @@ Unit tests should focus primarily on code affected by the release.
 Where practical, all unit tests should still be run because they are generally fast.
 
 ```bash
-pytest Tests/test_suite_consistency.py Tests/Unit -m "not slow" -k "not gpu or (synthetic and Metal)"
+pytest -m "minor_release" -k "not gpu or Metal"
 ```
 
 (replace Metal with the backend of the release machine)
@@ -754,7 +752,7 @@ All applicable unit tests should normally be run.
       <td>
         <ul>
           <li>Covers every GPU backend and resolution, higher resolutions exercise large arrays and memory limits</li>
-          <li>All resolutions run on the small synthetic head, the full head datasets only at Med_Res as their high resolutions take very long (set by RELEASE_REAL_DATASET_SPATIAL_STEPS in parameters.py; the other real dataset resolutions are still available as unit tests, marked release_exclude)</li>
+          <li>All resolutions run on the small synthetic head, the full head datasets only at Med_Res as their high resolutions take very long (RELEASE_SPATIAL_STEPS in parameters.py; the other real dataset resolutions are still available as unit tests)</li>
         </ul>
       </td>
     </tr>
@@ -762,12 +760,6 @@ All applicable unit tests should normally be run.
     <tr>
       <td>test_RunPlanTUSBackground</td>
       <td>
-        <b>Computing Backend:</b><br>
-        <ul>
-          <li>OpenCL</li>
-          <li>CUDA</li>
-          <li>Metal</li>
-        </ul>
         <b>Test dataset:</b><br>
         <ul>
           <li>ID_0082</li>
@@ -780,6 +772,7 @@ All applicable unit tests should normally be run.
       <td>
         <ul>
           <li>Test planTUS feature just to ensure it runs</li>
+          <li>PlanTUS runs on the CPU (through SimNIBS), so it doesn't depend on a GPU or computing backend</li>
           <li>Requires simnibs_root_path in config.ini, skipped on BabelBrain versions without PlanTUS</li>
         </ul>
       </td>
@@ -794,7 +787,7 @@ All applicable unit tests should normally be run.
 Important parameterized unit tests should cover representative values, boundary cases, and known failure cases.
 
 ```bash
-pytest Tests/test_suite_consistency.py Tests/Unit -m "not release_exclude"
+pytest -m "major_release"
 ```
 
 ### 4.2 Integration Tests

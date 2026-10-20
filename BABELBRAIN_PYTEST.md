@@ -26,10 +26,23 @@ pytest Tests/Unit/BabelBrain/test_FileManager.py
 ```
 which would run available tests for all the functions inside FileManager.py (assuming the tests exist)
 
+**Unit tests and real data**
+
+Unit tests that read the real datasets (ID_0082, ernie) get the `real_data` marker automatically. To run only the unit tests that use data they generate themselves (e.g. the synthetic head), which is quicker and needs no test data, add `-m "not real_data"`:
+
+```bash
+pytest -k "unit" -m "not real_data"           # unit tests without real data
+pytest -k "unit"                              # all unit tests
+pytest -k "unit" -m "real_data"               # only the unit tests using real data
+pytest -k "unit" -m "gpu and not real_data"   # combined with other markers
+```
+
+Only unit tests are marked: E2E, integration, regression and generate_outputs tests always use the real datasets.
+
 **Important to note that some unit tests are parameterized** 
 
 **Example**  
-test_nibabel_to_sitk relies on T1 data and thus is parameterized for image datasets (ID_0082 and ernie). Runnning
+test_nibabel_to_sitk relies on T1 data and thus is parameterized for image datasets (ID_0082 and ernie), so it's marked `real_data`. Runnning
 
 ```bash
 pytest -k "test_nibabel_to_sitk"
@@ -56,15 +69,16 @@ GPU unit tests are parameterized for spatial step
 - high_res
 - stress_res
 
-where high_res and stress_res are **much slower** to run due to higher resolution sims. Every spatial step runs on the real datasets (ID_0082, ernie) and on a small synthetic head (dataset id `synthetic`, generated automatically by [synthetic_dataset.py](synthetic_dataset.py) into the gitignored `Tests/.cache` folder), which makes the high resolutions practical. Release testing only runs the real datasets at medium_res (`RELEASE_REAL_DATASET_SPATIAL_STEPS` in [parameters.py](parameters.py)); their other resolutions are marked `release_exclude`, so
+where high_res and stress_res are **much slower** to run due to higher resolution sims. Every spatial step runs on the real datasets (ID_0082, ernie) and on a small synthetic head (dataset id `synthetic`, generated automatically by [synthetic_dataset.py](synthetic_dataset.py) into the gitignored `Tests/.cache` folder), which makes the high resolutions practical. The release test sets add the real datasets at one resolution only: low_res for minor releases and medium_res for major releases, with the synthetic head at every resolution in both (`RELEASE_SPATIAL_STEPS` in [parameters.py](parameters.py)). Unit tests and suite consistency checks are marked `minor_release` / `major_release` accordingly, so
 
 ```bash
-pytest Tests/Unit -m "gpu and not release_exclude"
+pytest -m "minor_release" -k "not gpu or Metal"   # minor release set on this machine's backend
+pytest -m "major_release"                         # major release set, all backends
 ```
 
-runs the release set, and the real datasets at high resolution can still be selected explicitly, e.g. `pytest Tests/Unit -k "ID_0082-High_Res and Metal"`. Each GPU test's report entry shows the inputs, the CPU and GPU outputs and a |GPU - CPU| difference panel (with the number of differing voxels in the whole volume), with a slider that moves the slice position through all three axes; the voxelization test shows the skin mesh, both voxelizations and the voxels only one of them found, with a slider that moves the camera around the mesh.
+run the release sets (see [BabelBrain_Pytest_Usage.md](BabelBrain_Pytest_Usage.md)). The real datasets at high resolution can still be selected explicitly, e.g. `pytest Tests/Unit -k "ID_0082-High_Res and Metal"`, and `-m "not real_data"` keeps only the synthetic head. Each GPU test's report entry shows the inputs, the CPU and GPU outputs and a |GPU - CPU| difference panel (with the number of differing voxels in the whole volume), with a slider that moves the slice position through all three axes; the voxelization test shows the skin mesh, both voxelizations and the voxels only one of them found, with a slider that moves the camera around the mesh.
 
-All plots in the reports use the same viewer ([report_viewers.py](report_viewers.py)): drag the slider (slice position, camera position, pipeline step, ...) or press Play to step through. All panels of a viewer stay on the same frame, and nothing plays until you press Play. Screenshots of the GUI (e.g. after each step of the full pipeline tests) are shown as plain images.
+All plots in the reports use the same viewer ([report_viewers.py](report_viewers.py)): drag the slider (slice position, camera position, ...) or press Play to step through. All panels of a viewer stay on the same frame, and nothing plays until you press Play. Screenshots of the GUI (e.g. after each step of the full pipeline tests) are shown as plain images.
 
 For a quick check on your machine's backend:
 

@@ -2,7 +2,8 @@
 Unit test for PlanTUSViewer.RunPlanTUS.RunPlanTUSBackground (BabelBrain_Pytest_Usage.md, Table 7).
 
 Runs PlanTUS (bundled in BabelBrain/ExternalBin/PlanTUS) for a single element transducer on a
-copy of the ID_0082 charm folder, only checking that it completes and writes its outputs.
+copy of the ID_0082 charm folder, only checking that it completes and writes its outputs. PlanTUS
+runs on the CPU (through SimNIBS), so the test doesn't depend on a GPU or computing backend.
 Requires simnibs_root_path in Tests/config.ini.
 """
 import glob
@@ -18,8 +19,7 @@ import numpy as np
 import pytest
 
 from Tests.parameters import (BABELBRAIN_ROOT, DATASETS, DEFAULT_TARGET,
-                              RELEASE_BACKENDS, requires_feature,
-                              trajectory_file)
+                              requires_feature, trajectory_file)
 from Tests.pipeline_helpers import simnibs_root
 
 PLANTUS_TIMEOUT_S = 60 * 60
@@ -27,19 +27,14 @@ PLANTUS_DATASET = 'ID_0082'
 
 
 @requires_feature('plantus')
+@pytest.mark.real_data  # runs PlanTUS on the ID_0082 charm folder
 @pytest.mark.slow
-@pytest.mark.parametrize('backend', [pytest.param(b, marks=pytest.mark.gpu) for b in RELEASE_BACKENDS])
-def test_RunPlanTUSBackground(tmp_path, backend):
-    from BabelBrain.SelFiles.SelFiles import SelFiles
+def test_RunPlanTUSBackground(tmp_path):
     from ConvMatTransform import ReadTrajectoryBrainsight
     from CreateVoxelMask import create_target_mask
     from PlanTUSViewer.RunPlanTUS import (FindTPOEquivalent, PlanTUSTxConfig,
                                           RunPlanTUSBackground)
 
-    # PlanTUS itself doesn't take a computing backend, the test is run once per backend
-    # available on this machine (others skipped) as specified in the usage document
-    if not any(b == backend for _, b in SelFiles.GetAvailableGPUs(None)):
-        pytest.skip(f"{backend} backend is not available on this machine")
     simnibs = simnibs_root()
 
     ds = DATASETS[PLANTUS_DATASET]
