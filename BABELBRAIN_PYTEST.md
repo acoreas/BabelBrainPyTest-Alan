@@ -165,23 +165,25 @@ A test_full_pipeline_normal test focused only on a deep target created using sli
 pytest -k "test_full_pipeline_normal and slicer and Deep_Target_Left and ernie and NONE and Single and 200kHz and CUDA"
 ```
 
-While this works, we've introduced the `basic_babelbrain_params` marker which grabs tests with the following parameter combinations:
-- Trajectory type
-    - brainsight
-- Target Location
-    - Deep_Target_Left
+While this works, the `basic_babelbrain_params` marker grabs the basic configuration, the standard full pipeline set up:
+- Patient Dataset
+    - ernie
 - CT Scan file
     - NONE
-    - CT
-    - ZTE
-- Patient Dataset
-    - ID_0082 (contains both CT and ZTE data)
+- Trajectory type / Target
+    - brainsight / Superficial_Target_Left
 - Transducer / Frequency
-    - Every transducer at all its frequencies, except Single (500 kHz), CTX_500 (500 kHz), H317 (250 and 825 kHz) and REMOPD (490 kHz)
+    - Single 500 kHz, CTX_500 500 kHz, H246 500 kHz, REMOPD 490 kHz, H317 250 kHz, DomeTx 220 kHz (one per transducer geometry type)
+- GPU Backend
+    - CUDA, OpenCL, Metal (backends not available on your system are skipped)
 
-The transducer/frequency choices of this and the other `*_babelbrain_params` markers are in `MARKER_TRANSDUCERS` in [parameters.py](parameters.py). Transducers not listed there are included automatically, so new transducers are covered without editing the tests.
+It's defined by `BASIC_PARAMS` in [parameters.py](parameters.py). The major release `regression_test_full_pipeline` (see [BabelBrain_Pytest_Usage.md](BabelBrain_Pytest_Usage.md), Table 10) runs this same configuration: its `REGRESSION_CASES` entry is `BASIC_PARAMS`, so changing the configuration there updates both. For the release test sets use the `minor_release` / `major_release` markers (see [BabelBrain_Pytest_Usage.md](BabelBrain_Pytest_Usage.md)); the other `*_babelbrain_params` markers choose their transducers/frequencies with `MARKER_TRANSDUCERS` in the same file.
 
-Which provides good coverage of BabelBrain user cases while being more manageable to run. Note that the trajectory type and GPU Backend still need to be specified by the user or can be left empty and tests will be skipped if they cannot be run on the user's current system.
+Similarly, the `intensive_babelbrain_params` marker grabs the intensive configuration: ID_0082 with CT, Deep_Target_Left, H317 at 825 kHz on CUDA, OpenCL and Metal. Tests with this marker also run with the configuration's multipoint profile (MultiFocus_Profile1) and intensive thermal profile, so they run it exactly. It's defined by `INTENSIVE_PARAMS` in [parameters.py](parameters.py), and the major release `regression_test_full_pipeline_intensive` runs this same configuration.
+
+```bash
+pytest -k "test_full_pipeline_normal" -m "intensive_babelbrain_params"
+```
 
 There are 3 E2E test that can be performed:
 ### test_full_pipeline_normal
@@ -276,6 +278,8 @@ The tests required for minor and major releases (regression, E2E and the PlanTUS
 ```bash
 pytest Tests/Regression -m generate_outputs
 ```
+The parameters of each regression test (one entry per row of Table 10: dataset, trajectory, target, scan types, transducers, profiles, ...) are in `REGRESSION_CASES` in [parameters.py](parameters.py); change a row there and the regression cases and the suite consistency checks follow. `regression_test_full_pipeline` and `regression_test_full_pipeline_intensive` use the basic and intensive configurations, `BASIC_PARAMS` and `INTENSIVE_PARAMS`, so they're edited there and the `basic_babelbrain_params` / `intensive_babelbrain_params` markers follow too. [test_suite_consistency.py](test_suite_consistency.py) checks that every dataset, target, scan type, transducer/frequency and input file a case names exists.
+
 Tests for features an older BabelBrain version doesn't have (remote servers, custom transducers, PlanTUS) are skipped automatically.
 
 ## Isolating a pytest run (crash and memory triage)

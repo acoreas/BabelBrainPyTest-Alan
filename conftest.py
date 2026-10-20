@@ -33,7 +33,7 @@ import BabelBrain.BabelBrain as bb_module # Needed to get monkeypatch working
 # ================================================================================================================================
 # PARAMETERS (defined in parameters.py)
 # ================================================================================================================================
-from Tests.parameters import (COMPUTING_BACKENDS, CT_TYPE_FILES, CT_TYPES,
+from Tests.parameters import (CONFIGURATION_MARKERS, COMPUTING_BACKENDS, CT_TYPE_FILES, CT_TYPES,
                               DATASETS, RELEASE_SPATIAL_STEPS,
                               SPATIAL_STEPS, SYNTHETIC_DATASET,
                               SYNTHETIC_DATASET_DIR, TRAJECTORY_TYPES,
@@ -872,28 +872,33 @@ def get_extra_scan_file():
     return _get_extra_scan_file
 
 @pytest.fixture()
-def babelbrain_widget(qtbot,
-                      monkeypatch,
-                      trajectory_type,
-                      scan_type,
-                      trajectory,
-                      dataset,
-                      transducer,
-                      frequency,
-                      computing_backend,
-                      tmp_path):
-    """Factory returning a BabelBrain widget set up for this test's parameters, writing its
-    outputs to tmp_path (or gen_output_folder when generate_outputs=True)."""
+def pipeline_case(request, trajectory_type, scan_type, trajectory, dataset, transducer, frequency, computing_backend):
+    """PipelineCase for this test's parameters. Tests marked with a configuration marker
+    (parameters.CONFIGURATION_MARKERS, e.g. intensive_babelbrain_params) also get that configuration's
+    thermal and multipoint profiles, so they run it exactly."""
+    import Tests.pipeline_helpers as rh
+    profiles = {}
+    for marker, config in CONFIGURATION_MARKERS.items():
+        if request.node.get_closest_marker(marker):
+            profiles = {'thermal_profile': config['thermal_profile'], 'multipoint_profile': config['multipoint_profile']}
+            break
+    return rh.PipelineCase(dataset=dataset['id'],
+                           transducer=transducer['name'],
+                           freq_khz=int(frequency/1000),
+                           backend=computing_backend['type'],
+                           target=trajectory,
+                           trajectory_type=trajectory_type,
+                           ct_type=scan_type,
+                           **profiles)
+
+@pytest.fixture()
+def babelbrain_widget(qtbot, monkeypatch, pipeline_case, tmp_path):
+    """Factory returning a BabelBrain widget set up for this test's parameters (pipeline_case), writing
+    its outputs to tmp_path (or gen_output_folder when generate_outputs=True)."""
     import Tests.pipeline_helpers as rh
 
     def _babelbrain_widget(generate_outputs=False):
-        case = rh.PipelineCase(dataset=dataset['id'],
-                               transducer=transducer['name'],
-                               freq_khz=int(frequency/1000),
-                               backend=computing_backend['type'],
-                               target=trajectory,
-                               trajectory_type=trajectory_type,
-                               ct_type=scan_type)
+        case = pipeline_case
         output_folder = os.path.join(gen_output_dir if generate_outputs else str(tmp_path), case.case_id)
         rh.auto_answer_dialogs(monkeypatch)
         return rh.build_babelbrain(qtbot, case, output_folder)
@@ -1156,9 +1161,14 @@ def pytest_collection_modifyitems(config, items):
         def selects(marker):
             return marker_selects_transducer(marker, tx, freq)
 
+        backend = params.get('computing_backend', {}).get('type')
+        for marker, config in CONFIGURATION_MARKERS.items():
+            if (dataset == config['dataset'] and scan in config['ct_types']
+                    and traj_type == config['trajectory_type'] and target == config['target']
+                    and (tx, int(freq/1000)) in config['transducers'] and backend in config['backends']):
+                item.add_marker(getattr(pytest.mark, marker))
+
         if dataset == 'ID_0082' and traj_type == 'brainsight':
-            if target == 'Deep_Target_Left' and scan in ('NONE', 'CT', 'ZTE') and selects('basic_babelbrain_params'):
-                item.add_marker(pytest.mark.basic_babelbrain_params)
             if selects('all_targets_babelbrain_params'):
                 if scan in ('NONE', 'CT', 'ZTE'):
                     item.add_marker(pytest.mark.all_targets_babelbrain_params)

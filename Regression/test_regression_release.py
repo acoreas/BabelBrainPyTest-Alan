@@ -20,45 +20,35 @@ reference location and run only the generate tests:
 """
 import pytest
 
-from Tests.parameters import (CT_TYPES, DEFAULT_MULTIPOINT_PROFILE,
-                              FULL_PIPELINE_INTENSIVE_TRANSDUCER,
-                              INTENSIVE_THERMAL_PROFILE,
-                              FULL_PIPELINE_TRANSDUCERS, RELEASE_BACKENDS,
-                              SKULL_MASK_TRANSDUCERS)
+from Tests.parameters import REGRESSION_CASES
 from Tests.pipeline_helpers import PipelineCase, case_param, find_reference_dir
 
 # ================================================================================================================================
-# CASES
+# CASES (parameters in parameters.REGRESSION_CASES)
 # ================================================================================================================================
 FULL_PIPELINE_SUITE = 'regression_full_pipeline'
 FULL_PIPELINE_INTENSIVE_SUITE = 'regression_full_pipeline_intensive'
 SKULL_MASK_SUITE = 'regression_GetSkullMaskFromSimbNIBSSTL'
 
-FULL_PIPELINE_CASES = [
-    case_param(PipelineCase(dataset='ernie', transducer=tx, freq_khz=freq, backend=backend),
-               marks=[pytest.mark.slow])
-    for backend in RELEASE_BACKENDS
-    for tx, freq in FULL_PIPELINE_TRANSDUCERS
-]
 
-FULL_PIPELINE_INTENSIVE_CASES = [
-    case_param(PipelineCase(dataset='ID_0082', transducer=FULL_PIPELINE_INTENSIVE_TRANSDUCER[0],
-                            freq_khz=FULL_PIPELINE_INTENSIVE_TRANSDUCER[1], backend=backend,
-                            target='Deep_Target_Left', ct_type='CT', multipoint_profile=DEFAULT_MULTIPOINT_PROFILE,
-                            thermal_profile=INTENSIVE_THERMAL_PROFILE),
-               marks=[pytest.mark.slow])
-    for backend in RELEASE_BACKENDS
-]
+def regression_cases(name, marks):
+    """pytest params for every combination of a REGRESSION_CASES entry."""
+    spec = REGRESSION_CASES[name]
+    return [case_param(PipelineCase(dataset=spec['dataset'], transducer=tx, freq_khz=freq, backend=backend,
+                                    target=spec['target'], trajectory_type=spec['trajectory_type'], ct_type=ct_type,
+                                    thermal_profile=spec['thermal_profile'],
+                                    multipoint_profile=spec['multipoint_profile'],
+                                    segment_soft_tissue=segment, last_step=spec['last_step']),
+                       marks=marks)
+            for backend in spec['backends']
+            for ct_type in spec['ct_types']
+            for tx, freq in spec['transducers']
+            for segment in spec['soft_tissue_segmentation']]
 
-SKULL_MASK_CASES = [
-    case_param(PipelineCase(dataset='ID_0082', transducer=tx, freq_khz=freq, backend=backend,
-                            ct_type=ct_type, segment_soft_tissue=segment, last_step=1),
-               marks=[pytest.mark.step1])
-    for backend in RELEASE_BACKENDS
-    for ct_type in CT_TYPES
-    for tx, freq in SKULL_MASK_TRANSDUCERS
-    for segment in [False, True]
-]
+
+FULL_PIPELINE_CASES = regression_cases('regression_test_full_pipeline', [pytest.mark.slow])
+FULL_PIPELINE_INTENSIVE_CASES = regression_cases('regression_test_full_pipeline_intensive', [pytest.mark.slow])
+SKULL_MASK_CASES = regression_cases('regression_test_GetSkullMaskFromSimbNIBSSTL', [pytest.mark.step1])
 
 
 # ================================================================================================================================

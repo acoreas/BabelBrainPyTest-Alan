@@ -47,9 +47,7 @@ def test_gui_options_match_test_labels(combo_name):
 # ================================================================================================================================
 def _referenced_transducers():
     """(where, transducer, kHz) for every transducer/frequency the tests name explicitly."""
-    refs = [('FULL_PIPELINE_TRANSDUCERS', tx, f) for tx, f in P.FULL_PIPELINE_TRANSDUCERS]
-    refs.append(('FULL_PIPELINE_INTENSIVE_TRANSDUCER', *P.FULL_PIPELINE_INTENSIVE_TRANSDUCER))
-    refs += [('SKULL_MASK_TRANSDUCERS', tx, f) for tx, f in P.SKULL_MASK_TRANSDUCERS]
+    refs = [(name, tx, f) for name, spec in P.REGRESSION_CASES.items() for tx, f in spec['transducers']]
     refs += [('CUSTOM_TX_EQUIVALENTS', eq['transducer'], eq['freq_khz']) for eq in P.CUSTOM_TX_EQUIVALENTS.values()]
     for marker, rule in P.MARKER_TRANSDUCERS.items():
         for tx, freqs in rule['frequencies'].items():
@@ -71,10 +69,24 @@ def test_referenced_transducers_exist(where, transducer, freq_khz):
 def test_every_transducer_type_has_full_pipeline_regression():
     if not P.TRANSDUCER_TYPES:
         pytest.skip(f"BabelBrain {P.BABELBRAIN_VERSION} doesn't define transducer geometry types")
-    covered = {P.TRANSDUCERS_BY_NAME[tx]['transducer_type'] for tx, _ in P.FULL_PIPELINE_TRANSDUCERS
-               if tx in P.TRANSDUCERS_BY_NAME}
+    transducers = P.BASIC_PARAMS['transducers']
+    covered = {P.TRANSDUCERS_BY_NAME[tx]['transducer_type'] for tx, _ in transducers if tx in P.TRANSDUCERS_BY_NAME}
     missing = sorted(set(P.TRANSDUCER_TYPES) - covered)
-    assert not missing, f"Transducer type(s) {missing} have no transducer in FULL_PIPELINE_TRANSDUCERS"
+    assert not missing, f"Transducer type(s) {missing} have no transducer in BASIC_PARAMS (regression_test_full_pipeline)"
+
+
+@pytest.mark.parametrize('name', sorted(P.REGRESSION_CASES))
+def test_regression_case_options_exist(name):
+    """Every dataset, trajectory type, target and scan type a regression case names is one the tests
+    and the BabelBrain version under test know."""
+    spec = P.REGRESSION_CASES[name]
+    targets = {**P.VALID_INDIVIDUAL_TARGETS, **P.VALID_COMBINED_TARGETS}
+    assert spec['dataset'] in P.DATASETS, f"{name}: unknown dataset {spec['dataset']}"
+    assert spec['target'] in targets, f"{name}: unknown target {spec['target']}"
+    assert spec['trajectory_type'] in P.TRAJECTORY_TYPES, \
+        f"{name}: trajectory type {spec['trajectory_type']} isn't offered by BabelBrain {P.BABELBRAIN_VERSION}"
+    unknown = [ct for ct in spec['ct_types'] if ct not in P.CT_TYPES]
+    assert not unknown, f"{name}: scan type(s) {unknown} aren't offered by BabelBrain {P.BABELBRAIN_VERSION}"
 
 
 @P.requires_feature('custom_transducers')
@@ -115,11 +127,17 @@ def _required_inputs():
         for trajectory_type in ('brainsight', 'slicer'):
             for target in P.TESTED_INDIVIDUAL_TARGETS:
                 files.append(str(P.trajectory_file(trajectory_type, ds['id'], target)))
-    files += [str(P.THERMAL_PROFILES_DIR / P.DEFAULT_THERMAL_PROFILE),
-              str(P.THERMAL_PROFILES_DIR / P.INTENSIVE_THERMAL_PROFILE),
-              str(P.MULTIPOINT_PROFILES_DIR / P.DEFAULT_MULTIPOINT_PROFILE),
-              os.path.join(P.DATASETS['ID_0082']['folder_path'], P.CT_TYPE_FILES['CT'])]
-    return files
+    files.append(str(P.THERMAL_PROFILES_DIR / P.DEFAULT_THERMAL_PROFILE))
+    # Everything each regression case reads
+    for spec in P.REGRESSION_CASES.values():
+        ds = P.DATASETS[spec['dataset']]
+        files.append(str(P.trajectory_file(spec['trajectory_type'], ds['id'], spec['target'])))
+        files.append(str(P.THERMAL_PROFILES_DIR / spec['thermal_profile']))
+        if spec['multipoint_profile']:
+            files.append(str(P.MULTIPOINT_PROFILES_DIR / spec['multipoint_profile']))
+        if spec['require_ct_files']:
+            files += [os.path.join(ds['folder_path'], P.CT_TYPE_FILES[ct]) for ct in spec['ct_types'] if ct != 'NONE']
+    return sorted(set(files))
 
 
 def _optional_inputs():

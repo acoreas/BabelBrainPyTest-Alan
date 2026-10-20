@@ -234,20 +234,85 @@ RELEASE_SPATIAL_STEPS = {
 # ================================================================================================================================
 # RELEASE TEST MATRIX (BabelBrain_Pytest_Usage.md, Tables 9 and 10)
 # ================================================================================================================================
-# One transducer (kHz) per general geometry type, test_suite_consistency.py fails if a new
-# geometry type is added to BabelBrain without a representative here
-FULL_PIPELINE_TRANSDUCERS = [
-    ('Single', 500),    # simple focused
-    ('CTX_500', 500),   # focused annular array
-    ('H246', 500),      # flat annular array
-    ('REMOPD', 490),    # flat array 2D
-    ('H317', 250),      # focused array
-    ('DomeTx', 220),    # focused array
-]
+# Basic configuration: the standard full pipeline set up (dataset, target, one transducer per
+# geometry type, ...). Run as regression_test_full_pipeline, and selected in the older
+# E2E/generate-outputs tests by the basic_babelbrain_params marker. Fields as in REGRESSION_CASES.
+BASIC_PARAMS = {
+    'dataset': 'ernie',
+    'trajectory_type': 'brainsight',
+    'target': DEFAULT_TARGET,
+    'ct_types': ['NONE'],
+    # One transducer per general geometry type (+ DomeTx); test_suite_consistency.py fails if a
+    # new geometry type is added to BabelBrain without a representative here
+    'transducers': [
+        ('Single', 500),    # simple focused
+        ('CTX_500', 500),   # focused annular array
+        ('H246', 500),      # flat annular array
+        ('REMOPD', 490),    # flat array 2D
+        ('H317', 250),      # focused array
+        ('DomeTx', 220),    # focused array
+    ],
+    'thermal_profile': DEFAULT_THERMAL_PROFILE,
+    'multipoint_profile': None,
+    'soft_tissue_segmentation': [False],
+    'last_step': 3,
+    'backends': RELEASE_BACKENDS,
+    'require_ct_files': True,
+}
 
-# regression_test_full_pipeline_intensive and regression_test_GetSkullMaskFromSimbNIBSSTL
-FULL_PIPELINE_INTENSIVE_TRANSDUCER = ('H317', 825)
-SKULL_MASK_TRANSDUCERS = [('Single', 500), ('Single', 250)]
+# Intensive configuration: a high frequency phased array with CT, multipoint focusing and long
+# sonications. Run as regression_test_full_pipeline_intensive, and selected in the older
+# E2E/generate-outputs tests by the intensive_babelbrain_params marker. Fields as in REGRESSION_CASES.
+INTENSIVE_PARAMS = {
+    'dataset': 'ID_0082',
+    'trajectory_type': 'brainsight',
+    'target': 'Deep_Target_Left',
+    'ct_types': ['CT'],
+    'transducers': [('H317', 825)],
+    'thermal_profile': INTENSIVE_THERMAL_PROFILE,
+    'multipoint_profile': DEFAULT_MULTIPOINT_PROFILE,
+    'soft_tissue_segmentation': [False],
+    'last_step': 3,
+    'backends': RELEASE_BACKENDS,
+    'require_ct_files': True,
+}
+
+# Major release regression tests, one entry per row of Table 10. Each case runs every combination of
+# backends x ct_types x transducers x soft_tissue_segmentation (Regression/test_regression_release.py).
+#   dataset, trajectory_type, target  inputs (see DATASETS, trajectory_file)
+#   ct_types                          extra scan types (CT_TYPES keys)
+#   transducers                       (transducer, kHz) pairs
+#   thermal_profile                   file in Tests/Profiles
+#   multipoint_profile                file in BabelBrain/Profiles, or None for a single focus
+#   soft_tissue_segmentation          values of Step 1's soft tissue segmentation option
+#   last_step                         last pipeline step run (1 = Step 1 only)
+#   require_ct_files                  False when the case covers scan types a dataset may not have
+#                                     (those combinations are skipped instead of required)
+REGRESSION_CASES = {
+    'regression_test_full_pipeline': BASIC_PARAMS,
+    'regression_test_full_pipeline_intensive': INTENSIVE_PARAMS,
+    'regression_test_GetSkullMaskFromSimbNIBSSTL': {
+        'dataset': 'ID_0082',
+        'trajectory_type': 'brainsight',
+        'target': DEFAULT_TARGET,
+        'ct_types': list(CT_TYPES),     # every scan type the GUI offers
+        'transducers': [('Single', 500), ('Single', 250)],
+        'thermal_profile': DEFAULT_THERMAL_PROFILE,
+        'multipoint_profile': None,
+        'soft_tissue_segmentation': [False, True],
+        'last_step': 1,
+        'backends': RELEASE_BACKENDS,
+        'require_ct_files': False,
+    },
+}
+
+# Markers selecting a configuration in the older E2E/generate-outputs tests (applied in
+# conftest.pytest_collection_modifyitems). Marked tests also run with the configuration's thermal
+# and multipoint profiles.
+CONFIGURATION_MARKERS = {
+    'basic_babelbrain_params': BASIC_PARAMS,
+    'intensive_babelbrain_params': INTENSIVE_PARAMS,
+}
 
 # Custom transducer template -> built-in transducer it replicates (see custom_tx_templates/)
 CUSTOM_TX_EQUIVALENTS = {
@@ -264,11 +329,8 @@ CUSTOM_TX_EQUIVALENTS = {
 # Transducer frequencies (kHz) each marker selects. include_others=True means every other
 # transducer is selected at all its frequencies, so newly added transducers are covered
 # automatically; an empty list excludes a transducer.
+
 MARKER_TRANSDUCERS = {
-    'basic_babelbrain_params': {
-        'include_others': True,
-        'frequencies': {'Single': [500], 'CTX_500': [500], 'H317': [250, 825], 'REMOPD': [490]},
-    },
     'all_targets_babelbrain_params': {
         'include_others': True,
         'frequencies': {'Single': [500], 'CTX_500': [500], 'H317': [250], 'REMOPD': [490],

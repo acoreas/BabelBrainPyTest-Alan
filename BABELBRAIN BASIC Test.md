@@ -18,7 +18,7 @@ Then check the test parameters still match BabelBrain and the test data is in pl
 
 ## Minimal test per release
 The test below should the bare minimum at every release.\
-It will test that no execution errors occurs processing one single dataset (ID_0082, deep left target) with MRI-only, CT and ZTE inputs, for every transducer (see `basic_babelbrain_params` in [BABELBRAIN_PYTEST.md](BABELBRAIN_PYTEST.md) for the frequencies used). Add `--collect-only` to see how many simulations it selects.
+It will test that no execution errors occurs running the full pipeline on the ernie dataset (MRI only, superficial target) with one transducer of each geometry type: the basic configuration (see `basic_babelbrain_params` in [BABELBRAIN_PYTEST.md](BABELBRAIN_PYTEST.md)), which the major release `regression_test_full_pipeline` also runs. Add `--collect-only` to see how many simulations it selects.
 
 `pytest Tests -k 'test_full_pipeline_normal and Metal' -m basic_babelbrain_params`
 
