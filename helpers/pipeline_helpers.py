@@ -44,7 +44,7 @@ import trimesh
 import yaml
 from PySide6.QtWidgets import QMessageBox
 
-from Tests.parameters import (BABELBRAIN_ROOT, COREGISTRATION, CT_TYPE_FILES,
+from Tests.helpers.parameters import (BABELBRAIN_ROOT, COREGISTRATION, CT_TYPE_FILES,
                               CT_TYPES, DATASETS, DEFAULT_TARGET,
                               DEFAULT_THERMAL_PROFILE, MULTIPOINT_PROFILES_DIR,
                               RELEASE_BACKENDS, SIMNIBS_TYPES,

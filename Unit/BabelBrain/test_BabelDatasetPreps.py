@@ -35,10 +35,10 @@ from trimesh.interfaces import blender
 
 import BabelBrain.BabelDatasetPreps as bdp
 from ConvMatTransform import ReadTrajectoryBrainsight
-from Tests.blender_view import blender_boolean
-from Tests.mesh_checks import check_intersection
-from Tests.parameters import BABELBRAIN_ROOT, trajectory_file
-from Tests.report_viewers import slider_viewer_entry
+from Tests.helpers.blender_view import blender_boolean
+from Tests.helpers.mesh_checks import check_intersection
+from Tests.helpers.parameters import BABELBRAIN_ROOT, trajectory_file
+from Tests.helpers.report_viewers import slider_viewer_entry
 
 ENGINES = [pytest.param(False, id='manifold'),
            pytest.param(True, id='blender',

@@ -20,8 +20,8 @@ reference location and run only the generate tests:
 """
 import pytest
 
-from Tests.parameters import REGRESSION_CASES
-from Tests.pipeline_helpers import PipelineCase, case_param, find_reference_dir
+from Tests.helpers.parameters import REGRESSION_CASES
+from Tests.helpers.pipeline_helpers import PipelineCase, case_param, find_reference_dir
 
 # ================================================================================================================================
 # CASES (parameters in parameters.REGRESSION_CASES)

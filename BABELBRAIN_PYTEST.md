@@ -69,7 +69,7 @@ GPU unit tests are parameterized for spatial step
 - high_res
 - stress_res
 
-where high_res and stress_res are **much slower** to run due to higher resolution sims. Every spatial step runs on the real datasets (ID_0082, ernie) and on a small synthetic head (dataset id `synthetic`, generated automatically by [synthetic_dataset.py](synthetic_dataset.py) into the gitignored `Tests/.cache` folder), which makes the high resolutions practical. The release test sets add the real datasets at one resolution only: low_res for minor releases and medium_res for major releases, with the synthetic head at every resolution in both (`RELEASE_SPATIAL_STEPS` in [parameters.py](parameters.py)). Unit tests and suite consistency checks are marked `minor_release` / `major_release` accordingly, so
+where high_res and stress_res are **much slower** to run due to higher resolution sims. Every spatial step runs on the real datasets (ID_0082, ernie) and on a small synthetic head (dataset id `synthetic`, generated automatically by [synthetic_dataset.py](helpers/synthetic_dataset.py) into the gitignored `Tests/.cache` folder), which makes the high resolutions practical. The release test sets add the real datasets at one resolution only: low_res for minor releases and medium_res for major releases, with the synthetic head at every resolution in both (`RELEASE_SPATIAL_STEPS` in [parameters.py](helpers/parameters.py)). Unit tests and suite consistency checks are marked `minor_release` / `major_release` accordingly, so
 
 ```bash
 pytest -m "minor_release" -k "not gpu or Metal"   # minor release set on this machine's backend
@@ -78,7 +78,7 @@ pytest -m "major_release"                         # major release set, all backe
 
 run the release sets (see [BabelBrain_Pytest_Usage.md](BabelBrain_Pytest_Usage.md)). The real datasets at high resolution can still be selected explicitly, e.g. `pytest Tests/Unit -k "ID_0082-High_Res and Metal"`, and `-m "not real_data"` keeps only the synthetic head. Each GPU test's report entry shows the inputs, the CPU and GPU outputs and a |GPU - CPU| difference panel (with the number of differing voxels in the whole volume), with a slider that moves the slice position through all three axes; the voxelization test shows the skin mesh, both voxelizations and the voxels only one of them found, with a slider that moves the camera around the mesh.
 
-All plots in the reports use the same viewer ([report_viewers.py](report_viewers.py)): drag the slider (slice position, camera position, ...) or press Play to step through. All panels of a viewer stay on the same frame, and nothing plays until you press Play. Screenshots of the GUI (e.g. after each step of the full pipeline tests) are shown as plain images.
+All plots in the reports use the same viewer ([report_viewers.py](helpers/report_viewers.py)): drag the slider (slice position, camera position, ...) or press Play to step through. All panels of a viewer stay on the same frame, and nothing plays until you press Play. Screenshots of the GUI (e.g. after each step of the full pipeline tests) are shown as plain images.
 
 For a quick check on your machine's backend:
 
@@ -109,20 +109,9 @@ pytest -k "unit" -m "step1"
 This will collect/run tests for **ANY** function called during step 1 (Assuming the appropriate test exists).
 Replace the `step1` marker with `step2` and `step3` for step 2 and step 3 unit tests respectively
 
-## Running a BabelBrain Integration Test
-Integration tests are broken into BabelBrain's 3 major steps therefore to run integration tests for step 1 simply type:
-```bash
-pytest -k "integration_step1.py"
-```
-or
-```bash
-pytest -k "integration" -m "step1"
-```
-Similar to above, replace "step1" with the appropriate tag for whatever step you wish to test.
-
 ## Running a BabelBrain E2E Test
 ### Background
-End-to-End Tests run the full BabelBrain pipeline and are parametrized based on (values defined in [parameters.py](parameters.py); options that the BabelBrain version under test doesn't offer are left out):
+End-to-End Tests run the full BabelBrain pipeline and are parametrized based on (values defined in [parameters.py](helpers/parameters.py); options that the BabelBrain version under test doesn't offer are left out):
 - Trajectory type
     - brainsight
     - slicer
@@ -177,9 +166,9 @@ While this works, the `basic_babelbrain_params` marker grabs the basic configura
 - GPU Backend
     - CUDA, OpenCL, Metal (backends not available on your system are skipped)
 
-It's defined by `BASIC_PARAMS` in [parameters.py](parameters.py). The major release `regression_test_full_pipeline` (see [BabelBrain_Pytest_Usage.md](BabelBrain_Pytest_Usage.md), Table 10) runs this same configuration: its `REGRESSION_CASES` entry is `BASIC_PARAMS`, so changing the configuration there updates both. For the release test sets use the `minor_release` / `major_release` markers (see [BabelBrain_Pytest_Usage.md](BabelBrain_Pytest_Usage.md)); the other `*_babelbrain_params` markers choose their transducers/frequencies with `MARKER_TRANSDUCERS` in the same file.
+It's defined by `BASIC_PARAMS` in [parameters.py](helpers/parameters.py). The major release `regression_test_full_pipeline` (see [BabelBrain_Pytest_Usage.md](BabelBrain_Pytest_Usage.md), Table 10) runs this same configuration: its `REGRESSION_CASES` entry is `BASIC_PARAMS`, so changing the configuration there updates both. For the release test sets use the `minor_release` / `major_release` markers (see [BabelBrain_Pytest_Usage.md](BabelBrain_Pytest_Usage.md)); the other `*_babelbrain_params` markers choose their transducers/frequencies with `MARKER_TRANSDUCERS` in the same file.
 
-Similarly, the `intensive_babelbrain_params` marker grabs the intensive configuration: ID_0082 with CT, Deep_Target_Left, H317 at 825 kHz on CUDA, OpenCL and Metal. Tests with this marker also run with the configuration's multipoint profile (MultiFocus_Profile1) and intensive thermal profile, so they run it exactly. It's defined by `INTENSIVE_PARAMS` in [parameters.py](parameters.py), and the major release `regression_test_full_pipeline_intensive` runs this same configuration.
+Similarly, the `intensive_babelbrain_params` marker grabs the intensive configuration: ID_0082 with CT, Deep_Target_Left, H317 at 825 kHz on CUDA, OpenCL and Metal. Tests with this marker also run with the configuration's multipoint profile (MultiFocus_Profile1) and intensive thermal profile, so they run it exactly. It's defined by `INTENSIVE_PARAMS` in [parameters.py](helpers/parameters.py), and the major release `regression_test_full_pipeline_intensive` runs this same configuration.
 
 ```bash
 pytest -k "test_full_pipeline_normal" -m "intensive_babelbrain_params"
@@ -278,7 +267,7 @@ The tests required for minor and major releases (regression, E2E and the PlanTUS
 ```bash
 pytest Tests/Regression -m generate_outputs
 ```
-The parameters of each regression test (one entry per row of Table 10: dataset, trajectory, target, scan types, transducers, profiles, ...) are in `REGRESSION_CASES` in [parameters.py](parameters.py); change a row there and the regression cases and the suite consistency checks follow. `regression_test_full_pipeline` and `regression_test_full_pipeline_intensive` use the basic and intensive configurations, `BASIC_PARAMS` and `INTENSIVE_PARAMS`, so they're edited there and the `basic_babelbrain_params` / `intensive_babelbrain_params` markers follow too. [test_suite_consistency.py](test_suite_consistency.py) checks that every dataset, target, scan type, transducer/frequency and input file a case names exists.
+The parameters of each regression test (one entry per row of Table 10: dataset, trajectory, target, scan types, transducers, profiles, ...) are in `REGRESSION_CASES` in [parameters.py](helpers/parameters.py); change a row there and the regression cases and the suite consistency checks follow. `regression_test_full_pipeline` and `regression_test_full_pipeline_intensive` use the basic and intensive configurations, `BASIC_PARAMS` and `INTENSIVE_PARAMS`, so they're edited there and the `basic_babelbrain_params` / `intensive_babelbrain_params` markers follow too. [test_suite_consistency.py](Consistency/test_suite_consistency.py) checks that every dataset, target, scan type, transducer/frequency and input file a case names exists.
 
 Tests for features an older BabelBrain version doesn't have (remote servers, custom transducers, PlanTUS) are skipped automatically.
 
@@ -289,7 +278,7 @@ A large selection is a single long-lived process: `pytest Tests -m "basic_babelb
 signal, or by the OS after memory creeps up — the terminal scrollback is all you get, the html report is
 never written, and there is no record of which case was running.
 
-[Tools/isolate_pytest.py](Tools/isolate_pytest.py) takes the same arguments you would give pytest, asks
+[scripts/isolate_pytest.py](scripts/isolate_pytest.py) takes the same arguments you would give pytest, asks
 pytest which cases they select, and runs **each case in its own pytest process**. A process per case is
 the only bullet-proof deallocation: when it exits, every host buffer, Metal/CUDA/OpenCL context and Qt
 object is released back to the OS, so anything that still grows across cases is on disk or in the GPU
@@ -297,13 +286,13 @@ driver rather than a leak that teardown would fix.
 
 ```bash
 # generate a per-case runner script, run nothing
-python Tests/Tools/isolate_pytest.py -- -s -m "basic_babelbrain_params"
+python Tests/scripts/isolate_pytest.py -- -s -m "basic_babelbrain_params"
 
 # collect and run now, one case per process
-python Tests/Tools/isolate_pytest.py --run -- -s -m "basic_babelbrain_params"
+python Tests/scripts/isolate_pytest.py --run -- -s -m "basic_babelbrain_params"
 
 # rerun only the cases that did not pass
-python Tests/Tools/isolate_pytest.py --run --from-file PyTest_Reports/isolated/<run>/failed_nodeids.txt
+python Tests/scripts/isolate_pytest.py --run --from-file PyTest_Reports/isolated/<run>/failed_nodeids.txt
 ```
 
 Everything after `--` goes to pytest verbatim. With no path argument the whole `Tests` tree is selected.
@@ -335,18 +324,18 @@ during and after the case.
 
 ```bash
 # is one case at fault, or is it accumulation? passes at 1, dies at 20 => accumulation
-python Tests/Tools/isolate_pytest.py --run --group 20 -- -m "basic_babelbrain_params"
+python Tests/scripts/isolate_pytest.py --run --group 20 -- -m "basic_babelbrain_params"
 
 # does one case leak? run it 5x inside a single process and watch peak RSS
-python Tests/Tools/isolate_pytest.py --run --repeat-each 5 --group 5 -- -k "H317 and Metal and NONE" -m basic_babelbrain_params
+python Tests/scripts/isolate_pytest.py --run --repeat-each 5 --group 5 -- -k "H317 and Metal and NONE" -m basic_babelbrain_params
 
 # stop a runaway before the OS kills your session, and bound a hang
-python Tests/Tools/isolate_pytest.py --run --max-rss-mb 60000 --timeout 3600 -- -m "basic_babelbrain_params"
+python Tests/scripts/isolate_pytest.py --run --max-rss-mb 60000 --timeout 3600 -- -m "basic_babelbrain_params"
 ```
 
 Other useful options: `--stop-on-crash`, `--start-at`/`--max-cases` to resume a long run, `--cooldown`
 to let the GPU driver settle between cases, `--no-html` to skip the per-case html report (keep it on if a
-test takes screenshots: `conftest.py` attaches them through `pytest_html.extras`, which only exists while
+test takes screenshots: `conftest.py` (through `helpers/report_viewers.py`) attaches them through `pytest_html.extras`, which only exists while
 the html plugin is loaded), `--quiet-child` to keep the console tidy (the logs are unaffected), and
 `--dry-run` to see the commands. Long GPU steps
 produce no output for minutes, so the runner prints a heartbeat with elapsed time and current RSS while a

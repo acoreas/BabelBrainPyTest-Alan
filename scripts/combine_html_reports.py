@@ -9,7 +9,7 @@ from datetime import datetime
 Combine all pytest-html reports in a directory into a single HTML report.
 
 Usage:
-    python combine_html_reports.py <input_directory> [-o <output>]
+    python Tests/scripts/combine_html_reports.py <input_directory> [-o <output>]
 
 Output behavior:
     - If -o is omitted, the report is saved as combined.html in the input directory.
@@ -18,10 +18,10 @@ Output behavior:
     - If <output> is a file path, the report is saved using the specified path and filename.
 
 Examples:
-    python combine_html_reports.py ./reports
-    python combine_html_reports.py ./reports -o test_summary.html
-    python combine_html_reports.py ./reports -o ./combined_reports
-    python combine_html_reports.py ./reports -o ./combined_reports/test_summary.html
+    python Tests/scripts/combine_html_reports.py ./reports
+    python Tests/scripts/combine_html_reports.py ./reports -o test_summary.html
+    python Tests/scripts/combine_html_reports.py ./reports -o ./combined_reports
+    python Tests/scripts/combine_html_reports.py ./reports -o ./combined_reports/test_summary.html
 """
 
 ALL_RESULTS = ["failed", "error", "xpassed", "skipped", "xfailed", "rerun", "retried", "passed"]

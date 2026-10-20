@@ -24,10 +24,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-from Tests.parameters import (BABELBRAIN_ROOT, CUSTOM_TX_EQUIVALENTS,
+from Tests.helpers.parameters import (BABELBRAIN_ROOT, CUSTOM_TX_EQUIVALENTS,
                               CUSTOM_TX_TEMPLATES_DIR, RELEASE_BACKENDS, config,
                               requires_feature)
-from Tests.pipeline_helpers import (PipelineCase, case_param,
+from Tests.helpers.pipeline_helpers import (PipelineCase, case_param,
                                     saved_outputs_reusable, thermal_outputs)
 
 CUSTOM_TX_SUITE = 'e2e_custom_tx_full_pipeline'

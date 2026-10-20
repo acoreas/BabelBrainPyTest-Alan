@@ -64,14 +64,25 @@ BabelBrain/
 │     └── ...
 ├── Tests/
 │     ├── config.ini
-│     ├── conftest.py               (fixtures and default parametrization)
-│     ├── parameters.py             (datasets, targets, profiles, transducers, release test matrix)
-│     ├── pipeline_helpers.py       (set up, run and compare BabelBrain pipelines)
-│     ├── test_suite_consistency.py (checks parameters.py still matches BabelBrain and the test data)
+│     ├── conftest.py               (fixtures and hooks, delegating to helpers/)
+│     ├── helpers/                  (code the tests import, never run directly)
+│     │    ├── parameters.py        (datasets, targets, profiles, transducers, release test matrix)
+│     │    ├── collection.py        (default parametrization and markers)
+│     │    ├── pipeline_helpers.py  (set up, run and compare BabelBrain pipelines)
+│     │    ├── comparisons.py       (array, mask, mesh and h5 output comparisons)
+│     │    ├── plots.py             (report plots: volume slices, mesh views)
+│     │    ├── report_viewers.py    (slider viewer and report entry html)
+│     │    ├── mesh_checks.py       (point-in-mesh checks for intersections)
+│     │    ├── blender_view.py      (Blender's own boolean result and .blend scenes)
+│     │    └── synthetic_dataset.py (small synthetic head for the GPU unit tests)
+│     ├── Consistency/              (checks parameters.py still matches BabelBrain and the test data)
 │     ├── Profiles/                 (pytest thermal profiles)
+│     ├── scripts/                  (run by hand around pytest, never imported by tests)
+│     │    ├── isolate_pytest.py    (one pytest process per test)
+│     │    ├── combine_html_reports.py
+│     │    └── examples/            (example regression shell scripts)
 │     ├── E2E/
 │     ├── Generate_Outputs/
-│     ├── Integration/
 │     ├── Regression/
 │     ├── Unit/
 │     │    ├── BabelBrain/
@@ -85,12 +96,14 @@ BabelBrain/
 └── ...
 </pre>
 
+`helpers/` holds code that pytest imports through `conftest.py` and the test files, so the suite breaks without it; `scripts/` holds command line tools you run yourself before or after a pytest run (e.g. `python Tests/scripts/combine_html_reports.py ./reports`), and no test imports them. New code a test or fixture needs goes in `helpers/`; anything you run by hand goes in `scripts/`.
+
 # Types of Tests
 **Unit Test:**  
 As the name implies, these tests are for specific functions or "units" of BabelBrain. Simplest test to ensure individual components work properly.
 
 **Integration Test:**  
-Tests to ensure multiple components work together.
+Tests to ensure multiple components work together. None are implemented yet; they would go in a `Tests/Integration/` folder.
 
 **E2E (End-to-End) Test:**  
 Tests to ensure the entire pipeline works as expected.
@@ -213,9 +226,9 @@ BabelBrain_Test_Data/
       └── &lt;type&gt;_&lt;dataset&gt;_deep_targets.txt         (combined, .yaml for slicer)
 </pre>
 
-where `<type>` is brainsight, slicer or localite (.xml). The GPU unit tests additionally use a small synthetic head that is generated automatically (see [synthetic_dataset.py](synthetic_dataset.py)), so it doesn't need to be in the data folder. The thermal profiles used by the tests are kept in this repo's [Profiles](Profiles) folder and the multipoint profile comes from BabelBrain's own `Profiles` folder.
+where `<type>` is brainsight, slicer or localite (.xml). The GPU unit tests additionally use a small synthetic head that is generated automatically (see [synthetic_dataset.py](helpers/synthetic_dataset.py)), so it doesn't need to be in the data folder. The thermal profiles used by the tests are kept in this repo's [Profiles](Profiles) folder and the multipoint profile comes from BabelBrain's own `Profiles` folder.
 
-Datasets, targets, profiles and the release test matrix are defined in [parameters.py](parameters.py). Transducers, their frequencies and the drop-down options are read from the BabelBrain checkout under test, so new ones are picked up automatically. Run `pytest Tests/test_suite_consistency.py` (no GPU needed, a few seconds) to check that the test parameters still match BabelBrain and that the test data is in place.
+Datasets, targets, profiles and the release test matrix are defined in [parameters.py](helpers/parameters.py). Transducers, their frequencies and the drop-down options are read from the BabelBrain checkout under test, so new ones are picked up automatically. Run `pytest Tests/Consistency` (no GPU needed, a few seconds) to check that the test parameters still match BabelBrain and that the test data is in place.
 
 # Further Reading
 For more information about pytest and its features, check out the [pytest documentation](https://docs.pytest.org/en/latest/).

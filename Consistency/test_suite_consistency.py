@@ -1,18 +1,18 @@
 """
-Checks that the test parameters in parameters.py still match the BabelBrain checkout and the test
+Checks that the test parameters in helpers/parameters.py still match the BabelBrain checkout and the test
 data, so a new transducer, GUI option or custom transducer template (or a renamed data file) shows
 up as a clear failure here instead of as silently skipped or untested cases.
 
 These need no GPU and run in seconds:
 
-    pytest Tests/test_suite_consistency.py
+    pytest Tests/Consistency
 """
 import os
 
 import pytest
 import yaml
 
-from Tests import parameters as P
+from Tests.helpers import parameters as P
 
 # ================================================================================================================================
 # APP OPTIONS

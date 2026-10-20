@@ -7,7 +7,7 @@ import pytest
 
 from BabelBrain.GPUFunctions.GPUVoxelize import Voxelize
 from BabelBrain.BabelDatasetPreps import FixMesh
-from Tests.report_viewers import slider_viewer_entry
+from Tests.helpers.report_viewers import slider_viewer_entry
 
 @pytest.mark.step1
 def test_Voxelize_vs_CPU(computing_backend,dataset,spatial_step,check_os,get_gpu_device,load_files,resample_grid,cached_cpu_truth,get_pyvista_plot,request):

@@ -14,7 +14,7 @@ device_name = M3
 
 Then check the test parameters still match BabelBrain and the test data is in place (no GPU needed):
 
-`pytest Tests/test_suite_consistency.py`
+`pytest Tests/Consistency`
 
 ## Minimal test per release
 The test below should the bare minimum at every release.\

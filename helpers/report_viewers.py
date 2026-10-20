@@ -1,5 +1,5 @@
 """
-Interactive image viewer for the pytest-html reports.
+Interactive image viewer for the pytest-html reports, and the html of a test's report entries.
 
 Every test that puts images in a report (2D volume slices, 3D mesh views, h5 comparisons, pipeline
 step screenshots) shows them through slider_viewer_html: a slider picks the frame (slice position,
@@ -105,3 +105,34 @@ def slider_viewer_html(panels, frame_label='Frame', frame_names=None, start=0, w
 def slider_viewer_entry(panels, **kwargs):
     """Report entry (for request.node.screenshots) holding a slider_viewer_html."""
     return {'kind': 'html', 'html': slider_viewer_html(panels, **kwargs)}
+
+
+def report_entries_html(entries):
+    """Html for a test's report entries (request.node.screenshots): html entries (viewers, tables)
+    each get a row, consecutive images (dicts with 'image', or legacy base64 WebP strings) share one."""
+    html_parts = []
+    row_tags = ''
+
+    def flush_row():
+        nonlocal row_tags
+        if row_tags:
+            html_parts.append(f"<tr>{row_tags}</tr>")
+            row_tags = ''
+
+    for entry in entries:
+        if isinstance(entry, dict):
+            kind = entry.get('kind', 'image')
+            if kind == 'html':
+                flush_row()
+                html_parts.append(f"<tr><td colspan='10'>{entry['html']}</td></tr>")
+            else:
+                caption = entry.get('caption')
+                caption_html = f"<div style='text-align:center;font-size:12px'>{caption}</div>" if caption else ''
+                width = entry.get('width', 500)
+                mime = entry.get('mime', 'webp')
+                row_tags += f"<td><img src='data:image/{mime};base64,{entry['image']}' width='{width}'>{caption_html}</td>"
+        else:
+            # Legacy entries: plain base64-encoded webp strings
+            row_tags += "<td><img src='data:image/webp;base64,{}' width='500'></td>".format(entry)
+    flush_row()
+    return ''.join(html_parts)

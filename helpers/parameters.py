@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-TESTS_DIR = Path(__file__).resolve().parent
+TESTS_DIR = Path(__file__).resolve().parent.parent
 BABELBRAIN_ROOT = TESTS_DIR.parent
 BABELBRAIN_SRC = BABELBRAIN_ROOT / 'BabelBrain'
 

@@ -18,9 +18,9 @@ import nibabel
 import numpy as np
 import pytest
 
-from Tests.parameters import (BABELBRAIN_ROOT, DATASETS, DEFAULT_TARGET,
+from Tests.helpers.parameters import (BABELBRAIN_ROOT, DATASETS, DEFAULT_TARGET,
                               requires_feature, trajectory_file)
-from Tests.pipeline_helpers import simnibs_root
+from Tests.helpers.pipeline_helpers import simnibs_root
 
 PLANTUS_TIMEOUT_S = 60 * 60
 PLANTUS_DATASET = 'ID_0082'
