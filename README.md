@@ -84,17 +84,25 @@ BabelBrain/
 │     ├── E2E/
 │     ├── Generate_Outputs/
 │     ├── Regression/
-│     ├── Unit/
+│     ├── Unit/                     (mirrors the BabelBrain repo: <source folder>/test_<module>.py)
 │     │    ├── BabelBrain/
 │     │    │    ├── test_BabelBrain.py
-│     │    │    └── test_BabelDatasetPreps.py
-│     │    ├── TranscranialModeling/
-│     │    │    ├── test_BabelIntegrationSingle.py
-│     │    │    └── ...
-│     │    └── ...
+│     │    │    ├── test_BabelDatasetPreps.py
+│     │    │    ├── test_FileManager.py
+│     │    │    ├── GPUFunctions/
+│     │    │    │    ├── GPUBinaryClosing/test_BinaryClosing.py
+│     │    │    │    ├── GPUResample/test_Resample.py
+│     │    │    │    └── ...
+│     │    │    └── PlanTUSViewer/
+│     │    │         └── test_RunPlanTUS.py
+│     │    └── TranscranialModeling/
+│     │         └── babel_integration/
+│     │              └── test_babel_integration_helpers.py
 │     └── ...
 └── ...
 </pre>
+
+Unit tests mirror the BabelBrain repo: the tests for `BabelBrain/GPUFunctions/GPUResample/Resample.py` are in `Tests/Unit/BabelBrain/GPUFunctions/GPUResample/test_Resample.py`. Put a new unit test in the folder matching its module's path.
 
 `helpers/` holds code that pytest imports through `conftest.py` and the test files, so the suite breaks without it; `scripts/` holds command line tools you run yourself before or after a pytest run (e.g. `python Tests/scripts/combine_html_reports.py ./reports`), and no test imports them. New code a test or fixture needs goes in `helpers/`; anything you run by hand goes in `scripts/`.
 
