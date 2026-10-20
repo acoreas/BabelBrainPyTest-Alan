@@ -30,6 +30,8 @@ from Tests.helpers.parameters import (BABELBRAIN_ROOT, CUSTOM_TX_EQUIVALENTS,
 from Tests.helpers.pipeline_helpers import (PipelineCase, case_param,
                                     saved_outputs_reusable, thermal_outputs)
 
+pytestmark = pytest.mark.major_release
+
 CUSTOM_TX_SUITE = 'e2e_custom_tx_full_pipeline'
 REMOTE_SERVER_NAME = 'pytest-server'
 SERVER_START_TIMEOUT_S = 180

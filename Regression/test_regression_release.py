@@ -23,6 +23,8 @@ import pytest
 from Tests.helpers.parameters import REGRESSION_CASES
 from Tests.helpers.pipeline_helpers import PipelineCase, case_param, find_reference_dir
 
+pytestmark = pytest.mark.major_release
+
 # ================================================================================================================================
 # CASES (parameters in parameters.REGRESSION_CASES)
 # ================================================================================================================================
